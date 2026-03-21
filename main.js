@@ -36038,7 +36038,8 @@ var DEFAULT_SETTINGS = {
   ossBucket: "",
   ossAccessKeyId: "",
   ossAccessKeySecret: "",
-  ossPrefix: "notes"
+  ossPrefix: "notes",
+  ossDomain: ""
 };
 var ShareOnlineSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -36085,6 +36086,12 @@ var ShareOnlineSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("\u4E0A\u4F20\u524D\u7F00\u8DEF\u5F84").setDesc("OSS \u4E2D\u7684\u76EE\u5F55\u524D\u7F00\uFF0C\u4F8B\u5982 notes \u2192 notes/<\u7B14\u8BB0\u540D>/index.html").addText(
       (text) => text.setPlaceholder("notes").setValue(this.plugin.settings.ossPrefix).onChange(async (value) => {
         this.plugin.settings.ossPrefix = value.trim() || DEFAULT_SETTINGS.ossPrefix;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u81EA\u5B9A\u4E49\u57DF\u540D").setDesc("\u66FF\u6362\u9ED8\u8BA4\u7684 OSS \u57DF\u540D\uFF0C\u7559\u7A7A\u5219\u4F7F\u7528\u9ED8\u8BA4\u3002\u4F8B\u5982 https://cdn.example.com").addText(
+      (text) => text.setPlaceholder("https://cdn.example.com").setValue(this.plugin.settings.ossDomain).onChange(async (value) => {
+        this.plugin.settings.ossDomain = value.trim().replace(/\/$/, "");
         await this.plugin.saveSettings();
       })
     );
@@ -37562,7 +37569,9 @@ async function uploadToOss(settings, noteName, html, css) {
   const cssKey = `${prefix}/${noteName}/style.css`;
   await client.put(htmlKey, new Blob([html], { type: "text/html; charset=utf-8" }));
   await client.put(cssKey, new Blob([css], { type: "text/css; charset=utf-8" }));
-  const url = `https://${ossBucket}.${ossRegion}.aliyuncs.com/${htmlKey}`;
+  const { ossDomain } = settings;
+  const base = ossDomain || `https://${ossBucket}.${ossRegion}.aliyuncs.com`;
+  const url = `${base}/${htmlKey}`;
   await navigator.clipboard.writeText(url);
   new import_obsidian3.Notice(`\u4E0A\u4F20\u6210\u529F\uFF01\u94FE\u63A5\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F
 ${url}`);
