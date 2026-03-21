@@ -36597,11 +36597,11 @@ body:hover ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.4); }
 }
 
 // src/exporter.ts
-async function prepareExport(app, vault, file) {
+async function prepareExport(app, vault, file, existingName) {
   const raw = await vault.read(file);
   const { html: htmlBody, css } = await renderNote(app, file, raw);
   const html = buildHtml(file.basename, htmlBody);
-  const folderName = Date.now().toString(36);
+  const folderName = existingName != null ? existingName : Date.now().toString(36);
   return { noteName: folderName, html, css };
 }
 async function exportToLocal(app, vault, file, exportRoot) {
@@ -36621,7 +36621,7 @@ async function uploadToOss(settings, noteName, html, css) {
   const { ossRegion, ossBucket, ossAccessKeyId, ossAccessKeySecret, ossPrefix } = settings;
   if (!ossRegion || !ossBucket || !ossAccessKeyId || !ossAccessKeySecret) {
     new import_obsidian4.Notice("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u586B\u5199 OSS \u914D\u7F6E\u4FE1\u606F");
-    return;
+    return "";
   }
   new import_obsidian4.Notice("\u6B63\u5728\u4E0A\u4F20\u5230 OSS...");
   const client = new OSS({
@@ -36639,12 +36639,31 @@ async function uploadToOss(settings, noteName, html, css) {
   const { ossDomain } = settings;
   const base = ossDomain || `https://${ossBucket}.${ossRegion}.aliyuncs.com`;
   const url = `${base}/${htmlKey}`;
-  await navigator.clipboard.writeText(url);
-  new import_obsidian4.Notice(`\u4E0A\u4F20\u6210\u529F\uFF01\u94FE\u63A5\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F
+  new import_obsidian4.Notice(`\u4E0A\u4F20\u6210\u529F
 ${url}`);
+  return url;
+}
+async function deleteFromOss(settings, noteName) {
+  const { ossRegion, ossBucket, ossAccessKeyId, ossAccessKeySecret, ossPrefix } = settings;
+  if (!ossRegion || !ossBucket || !ossAccessKeyId || !ossAccessKeySecret) {
+    new import_obsidian4.Notice("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u586B\u5199 OSS \u914D\u7F6E\u4FE1\u606F");
+    return;
+  }
+  const client = new OSS({
+    region: ossRegion,
+    accessKeyId: ossAccessKeyId,
+    accessKeySecret: ossAccessKeySecret,
+    bucket: ossBucket,
+    authorizationV4: true
+  });
+  const prefix = ossPrefix.replace(/\/$/, "");
+  await client.delete(`${prefix}/${noteName}/index.html`);
+  await client.delete(`${prefix}/${noteName}/style.css`);
 }
 
 // main.ts
+var THEME_COLOR = "#65A692";
+var SVG_SHARE = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`;
 var ShareOnlinePlugin = class extends import_obsidian5.Plugin {
   async onload() {
     await this.loadSettings();
@@ -36659,12 +36678,121 @@ var ShareOnlinePlugin = class extends import_obsidian5.Plugin {
       name: "\u5BFC\u51FA\u5230 OSS",
       callback: () => this.exportCurrentNote(true)
     });
+    this.statusBarEl = this.addStatusBarItem();
+    this.statusBarEl.innerHTML = SVG_SHARE;
+    this.statusBarEl.style.cssText = "cursor:pointer; display:flex; align-items:center; padding:0 4px;";
+    this.statusBarEl.title = "\u5206\u4EAB\u7B14\u8BB0";
+    this.updateStatusBar();
+    this.statusBarEl.addEventListener("click", (e) => this.showShareMenu(e));
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => this.updateStatusBar())
+    );
+    this.registerEvent(
+      this.app.metadataCache.on("changed", (changedFile) => {
+        const active = this.app.workspace.getActiveFile();
+        if (active && changedFile.path === active.path)
+          this.updateStatusBar();
+      })
+    );
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
   }
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+  // ── Frontmatter helpers ───────────────────────────────────────────────
+  getShareLink(file) {
+    var _a, _b, _c;
+    return (_c = (_b = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter) == null ? void 0 : _b.share_link) != null ? _c : "";
+  }
+  async setShareLink(file, url) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      fm.share_link = url;
+    });
+  }
+  async removeShareLink(file) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      delete fm.share_link;
+    });
+  }
+  // ── Status bar ───────────────────────────────────────────────────────
+  updateStatusBar() {
+    const file = this.app.workspace.getActiveFile();
+    const published = file ? !!this.getShareLink(file) : false;
+    const svg = this.statusBarEl.querySelector("svg");
+    if (svg)
+      svg.style.color = published ? THEME_COLOR : "var(--text-muted)";
+    this.statusBarEl.title = published ? "\u5DF2\u53D1\u5E03 \u2014 \u70B9\u51FB\u7BA1\u7406" : "\u5206\u4EAB\u7B14\u8BB0";
+  }
+  showShareMenu(event) {
+    const file = this.app.workspace.getActiveFile();
+    if (!file) {
+      new import_obsidian5.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
+      return;
+    }
+    const published = !!this.getShareLink(file);
+    const menu = new import_obsidian5.Menu();
+    if (!published) {
+      menu.addItem(
+        (item) => item.setTitle("\u53D1\u5E03\u5230\u7EBF\u4E0A").setIcon("upload-cloud").onClick(() => this.publishNote(file))
+      );
+      menu.addItem(
+        (item) => item.setTitle("\u5BFC\u51FA\u5230\u672C\u5730").setIcon("download").onClick(() => this.exportFile(file, false))
+      );
+    } else {
+      menu.addItem(
+        (item) => item.setTitle("\u6253\u5F00\u94FE\u63A5").setIcon("external-link").onClick(() => {
+          const url = this.getShareLink(file);
+          window.open(url, "_blank");
+        })
+      );
+      menu.addItem(
+        (item) => item.setTitle("\u66F4\u65B0\u7EBF\u4E0A\u5185\u5BB9").setIcon("refresh-cw").onClick(() => this.updateNote(file))
+      );
+      menu.addItem(
+        (item) => item.setTitle("\u505C\u6B62\u5206\u4EAB").setIcon("eye-off").onClick(() => this.unpublishNote(file))
+      );
+      menu.addSeparator();
+      menu.addItem(
+        (item) => item.setTitle("\u5BFC\u51FA\u5230\u672C\u5730").setIcon("download").onClick(() => this.exportFile(file, false))
+      );
+    }
+    menu.showAtMouseEvent(event);
+  }
+  // ── Actions ──────────────────────────────────────────────────────────
+  async publishNote(file) {
+    const url = await this.exportFile(file, true);
+    if (url) {
+      await this.setShareLink(file, url);
+      this.updateStatusBar();
+      await navigator.clipboard.writeText(url);
+      new import_obsidian5.Notice("\u53D1\u5E03\u6210\u529F\uFF01\u94FE\u63A5\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F");
+    }
+  }
+  async updateNote(file) {
+    const existingUrl = this.getShareLink(file);
+    const existingName = existingUrl ? existingUrl.split("/").slice(-2, -1)[0] : void 0;
+    const url = await this.exportFile(file, true, existingName);
+    if (url) {
+      await this.setShareLink(file, url);
+      this.updateStatusBar();
+      new import_obsidian5.Notice("\u66F4\u65B0\u6210\u529F\uFF01");
+    }
+  }
+  async unpublishNote(file) {
+    const existingUrl = this.getShareLink(file);
+    if (existingUrl) {
+      const existingName = existingUrl.split("/").slice(-2, -1)[0];
+      try {
+        await deleteFromOss(this.settings, existingName);
+      } catch (err) {
+        console.error("\u5220\u9664 OSS \u6587\u4EF6\u5931\u8D25\uFF1A", err);
+      }
+    }
+    await this.removeShareLink(file);
+    this.updateStatusBar();
+    new import_obsidian5.Notice("\u5DF2\u505C\u6B62\u5206\u4EAB");
   }
   async exportCurrentNote(toOss = false) {
     const file = this.app.workspace.getActiveFile();
@@ -36674,11 +36802,11 @@ var ShareOnlinePlugin = class extends import_obsidian5.Plugin {
     }
     await this.exportFile(file, toOss);
   }
-  async exportFile(file, toOss = false) {
+  async exportFile(file, toOss = false, existingName) {
     try {
       if (toOss) {
-        const result = await prepareExport(this.app, this.app.vault, file);
-        await uploadToOss(this.settings, result.noteName, result.html, result.css);
+        const result = await prepareExport(this.app, this.app.vault, file, existingName);
+        return await uploadToOss(this.settings, result.noteName, result.html, result.css);
       } else {
         await exportToLocal(
           this.app,
@@ -36686,10 +36814,12 @@ var ShareOnlinePlugin = class extends import_obsidian5.Plugin {
           file,
           this.settings.exportPath || DEFAULT_SETTINGS.exportPath
         );
+        return "";
       }
     } catch (err) {
       new import_obsidian5.Notice(`\u5BFC\u51FA\u5931\u8D25\uFF1A${err.message}`);
       console.error(err);
+      return "";
     }
   }
   onunload() {

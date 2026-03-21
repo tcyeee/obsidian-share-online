@@ -9,11 +9,11 @@ export interface ExportResult {
 	css: string;
 }
 
-export async function prepareExport(app: App, vault: Vault, file: TFile): Promise<ExportResult> {
+export async function prepareExport(app: App, vault: Vault, file: TFile, existingName?: string): Promise<ExportResult> {
 	const raw = await vault.read(file);
 	const { html: htmlBody, css } = await renderNote(app, file, raw);
 	const html = buildHtml(file.basename, htmlBody);
-	const folderName = Date.now().toString(36);
+	const folderName = existingName ?? Date.now().toString(36);
 	return { noteName: folderName, html, css };
 }
 
