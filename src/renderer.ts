@@ -9,109 +9,109 @@ const THEME = "#65A692";
 interface MathEntry { type: "display" | "inline"; latex: string; }
 
 function extractMath(content: string): { processed: string; entries: MathEntry[] } {
-	const entries: MathEntry[] = [];
-	const codes: string[] = [];
+  const entries: MathEntry[] = [];
+  const codes: string[] = [];
 
-	// Protect fenced code blocks and inline code from math extraction
-	let processed = content.replace(/```[\s\S]*?```|`[^`\n]+`/g, (m) => {
-		codes.push(m);
-		return `\x00C${codes.length - 1}\x00`;
-	});
+  // Protect fenced code blocks and inline code from math extraction
+  let processed = content.replace(/```[\s\S]*?```|`[^`\n]+`/g, (m) => {
+    codes.push(m);
+    return `\x00C${codes.length - 1}\x00`;
+  });
 
-	// Extract display math $$...$$
-	processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (_, latex) => {
-		const i = entries.length;
-		entries.push({ type: "display", latex: latex.trim() });
-		return `\n<div class="math-d" data-mi="${i}"></div>\n`;
-	});
+  // Extract display math $$...$$
+  processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (_, latex) => {
+    const i = entries.length;
+    entries.push({ type: "display", latex: latex.trim() });
+    return `\n<div class="math-d" data-mi="${i}"></div>\n`;
+  });
 
-	// Extract inline math $...$
-	processed = processed.replace(/\$([^\n$]+?)\$/g, (_, latex) => {
-		const i = entries.length;
-		entries.push({ type: "inline", latex });
-		return `<span class="math-i" data-mi="${i}"></span>`;
-	});
+  // Extract inline math $...$
+  processed = processed.replace(/\$([^\n$]+?)\$/g, (_, latex) => {
+    const i = entries.length;
+    entries.push({ type: "inline", latex });
+    return `<span class="math-i" data-mi="${i}"></span>`;
+  });
 
-	// Restore code blocks
-	processed = processed.replace(/\x00C(\d+)\x00/g, (_, i) => codes[+i]);
-	return { processed, entries };
+  // Restore code blocks
+  processed = processed.replace(/\x00C(\d+)\x00/g, (_, i) => codes[+i]);
+  return { processed, entries };
 }
 
 /* ── Renderer ──────────────────────────────────────────────────────────── */
 export async function renderNote(
-	app: App,
-	file: TFile,
-	rawContent: string
+  app: App,
+  file: TFile,
+  rawContent: string
 ): Promise<{ html: string; css: string }> {
-	const content = rawContent.replace(/^---[\s\S]*?---\n?/, "");
-	const { processed, entries } = extractMath(content);
+  const content = rawContent.replace(/^---[\s\S]*?---\n?/, "");
+  const { processed, entries } = extractMath(content);
 
-	const el = document.createElement("div");
-	el.className = "markdown-preview-view markdown-rendered";
+  const el = document.createElement("div");
+  el.className = "markdown-preview-view markdown-rendered";
 
-	const component = new Component();
-	component.load();
-	await MarkdownRenderer.render(app, processed, el, file.path, component);
+  const component = new Component();
+  component.load();
+  await MarkdownRenderer.render(app, processed, el, file.path, component);
 
-	// Wait for async post-processors (callout icons, etc.)
-	await new Promise((r) => setTimeout(r, 300));
-	component.unload();
+  // Wait for async post-processors (callout icons, etc.)
+  await new Promise((r) => setTimeout(r, 300));
+  component.unload();
 
-	// Restore math content for KaTeX
-	el.querySelectorAll<HTMLElement>("[data-mi]").forEach((placeholder) => {
-		const idx = parseInt(placeholder.getAttribute("data-mi") ?? "0");
-		const entry = entries[idx];
-		if (entry) placeholder.textContent = entry.latex;
-	});
+  // Restore math content for KaTeX
+  el.querySelectorAll<HTMLElement>("[data-mi]").forEach((placeholder) => {
+    const idx = parseInt(placeholder.getAttribute("data-mi") ?? "0");
+    const entry = entries[idx];
+    if (entry) placeholder.textContent = entry.latex;
+  });
 
-	// Remove Obsidian's native copy buttons
-	el.querySelectorAll(".copy-code-button").forEach((b) => b.remove());
+  // Remove Obsidian's native copy buttons
+  el.querySelectorAll(".copy-code-button").forEach((b) => b.remove());
 
-	// Wrap tables in .table-wrapper
-	el.querySelectorAll("table").forEach((table) => {
-		const wrapper = document.createElement("div");
-		wrapper.className = "table-wrapper";
-		table.parentNode?.insertBefore(wrapper, table);
-		wrapper.appendChild(table);
-	});
+  // Wrap tables in .table-wrapper
+  el.querySelectorAll("table").forEach((table) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "table-wrapper";
+    table.parentNode?.insertBefore(wrapper, table);
+    wrapper.appendChild(table);
+  });
 
-	return { html: el.innerHTML, css: buildCss() };
+  return { html: el.innerHTML, css: buildCss() };
 }
 
 /* ── HTML builder ──────────────────────────────────────────────────────── */
 export function buildHtml(title: string, htmlBody: string): string {
-	const svgCopy = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
-	const svgCheck = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${THEME}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+  const svgCopy = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+  const svgCheck = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${THEME}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
 
-	// Minimal Lucide SVG paths for common callout types
-	const calloutIcons: Record<string, string> = {
-		note:      `<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/>`,
-		info:      `<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>`,
-		tip:       `<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>`,
-		warning:   `<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
-		danger:    `<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>`,
-		success:   `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>`,
-		question:  `<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
-		bug:       `<path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/>`,
-		example:   `<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>`,
-		quote:     `<path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/>`,
-		abstract:  `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>`,
-		todo:      `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>`,
-	};
-	const calloutAliases: Record<string, string> = {
-		caution: "warning", attention: "warning",
-		error: "danger", failure: "danger", fail: "danger", missing: "danger",
-		check: "success", done: "success",
-		help: "question", faq: "question",
-		hint: "tip", important: "tip",
-		summary: "abstract", tldr: "abstract",
-		cite: "quote",
-	};
+  // Minimal Lucide SVG paths for common callout types
+  const calloutIcons: Record<string, string> = {
+    note: `<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/>`,
+    info: `<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>`,
+    tip: `<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>`,
+    warning: `<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
+    danger: `<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>`,
+    success: `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>`,
+    question: `<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
+    bug: `<path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/>`,
+    example: `<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>`,
+    quote: `<path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/>`,
+    abstract: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>`,
+    todo: `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>`,
+  };
+  const calloutAliases: Record<string, string> = {
+    caution: "warning", attention: "warning",
+    error: "danger", failure: "danger", fail: "danger", missing: "danger",
+    check: "success", done: "success",
+    help: "question", faq: "question",
+    hint: "tip", important: "tip",
+    summary: "abstract", tldr: "abstract",
+    cite: "quote",
+  };
 
-	const iconsJson = JSON.stringify(calloutIcons);
-	const aliasJson = JSON.stringify(calloutAliases);
+  const iconsJson = JSON.stringify(calloutIcons);
+  const aliasJson = JSON.stringify(calloutAliases);
 
-	return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
@@ -121,13 +121,13 @@ export function buildHtml(title: string, htmlBody: string): string {
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <button class="toc-toggle" id="toc-toggle" title="目录">
+  <button class="toc-toggle" id="toc-toggle" title="OUTLINE">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
   </button>
   <div class="toc-backdrop" id="toc-backdrop"></div>
   <nav class="toc-sidebar" id="toc-sidebar">
     <div class="toc-header">
-      <span class="toc-title">目录</span>
+      <span class="toc-title">OUTLINE</span>
       <button class="toc-close" id="toc-close" title="关闭">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -301,7 +301,7 @@ ${htmlBody}
 
 /* ── CSS ───────────────────────────────────────────────────────────────── */
 export function buildCss(): string {
-	return `/* ── Reset ── */
+  return `/* ── Reset ── */
 *, *::before, *::after { box-sizing: border-box; }
 
 /* ── Page ── */
