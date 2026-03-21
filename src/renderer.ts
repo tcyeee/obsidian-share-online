@@ -2,25 +2,72 @@ import { App, TFile, MarkdownRenderer, Component } from "obsidian";
 
 const THEME = "#65A692";
 
+/* ── Math extraction ──────────────────────────────────────────────────────
+   Extract $$...$$ and $...$ before Obsidian processes the markdown,
+   so we can hand them to KaTeX in the exported HTML.
+──────────────────────────────────────────────────────────────────────── */
+interface MathEntry { type: "display" | "inline"; latex: string; }
+
+function extractMath(content: string): { processed: string; entries: MathEntry[] } {
+	const entries: MathEntry[] = [];
+	const codes: string[] = [];
+
+	// Protect fenced code blocks and inline code from math extraction
+	let processed = content.replace(/```[\s\S]*?```|`[^`\n]+`/g, (m) => {
+		codes.push(m);
+		return `\x00C${codes.length - 1}\x00`;
+	});
+
+	// Extract display math $$...$$
+	processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (_, latex) => {
+		const i = entries.length;
+		entries.push({ type: "display", latex: latex.trim() });
+		return `\n<div class="math-d" data-mi="${i}"></div>\n`;
+	});
+
+	// Extract inline math $...$
+	processed = processed.replace(/\$([^\n$]+?)\$/g, (_, latex) => {
+		const i = entries.length;
+		entries.push({ type: "inline", latex });
+		return `<span class="math-i" data-mi="${i}"></span>`;
+	});
+
+	// Restore code blocks
+	processed = processed.replace(/\x00C(\d+)\x00/g, (_, i) => codes[+i]);
+	return { processed, entries };
+}
+
+/* ── Renderer ──────────────────────────────────────────────────────────── */
 export async function renderNote(
 	app: App,
 	file: TFile,
 	rawContent: string
 ): Promise<{ html: string; css: string }> {
 	const content = rawContent.replace(/^---[\s\S]*?---\n?/, "");
+	const { processed, entries } = extractMath(content);
 
 	const el = document.createElement("div");
 	el.className = "markdown-preview-view markdown-rendered";
 
 	const component = new Component();
 	component.load();
-	await MarkdownRenderer.render(app, content, el, file.path, component);
+	await MarkdownRenderer.render(app, processed, el, file.path, component);
+
+	// Wait for async post-processors (callout icons, etc.)
+	await new Promise((r) => setTimeout(r, 300));
 	component.unload();
 
-	// Remove Obsidian's native copy buttons to avoid duplicates
+	// Restore math content for KaTeX
+	el.querySelectorAll<HTMLElement>("[data-mi]").forEach((placeholder) => {
+		const idx = parseInt(placeholder.getAttribute("data-mi") ?? "0");
+		const entry = entries[idx];
+		if (entry) placeholder.textContent = entry.latex;
+	});
+
+	// Remove Obsidian's native copy buttons
 	el.querySelectorAll(".copy-code-button").forEach((b) => b.remove());
 
-	// Wrap each table in .table-wrapper for outer border + border-radius
+	// Wrap tables in .table-wrapper
 	el.querySelectorAll("table").forEach((table) => {
 		const wrapper = document.createElement("div");
 		wrapper.className = "table-wrapper";
@@ -31,9 +78,38 @@ export async function renderNote(
 	return { html: el.innerHTML, css: buildCss() };
 }
 
+/* ── HTML builder ──────────────────────────────────────────────────────── */
 export function buildHtml(title: string, htmlBody: string): string {
 	const svgCopy = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 	const svgCheck = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${THEME}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+	// Minimal Lucide SVG paths for common callout types
+	const calloutIcons: Record<string, string> = {
+		note:      `<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/>`,
+		info:      `<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>`,
+		tip:       `<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>`,
+		warning:   `<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
+		danger:    `<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>`,
+		success:   `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>`,
+		question:  `<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
+		bug:       `<path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/>`,
+		example:   `<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>`,
+		quote:     `<path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/>`,
+		abstract:  `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>`,
+		todo:      `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>`,
+	};
+	const calloutAliases: Record<string, string> = {
+		caution: "warning", attention: "warning",
+		error: "danger", failure: "danger", fail: "danger", missing: "danger",
+		check: "success", done: "success",
+		help: "question", faq: "question",
+		hint: "tip", important: "tip",
+		summary: "abstract", tldr: "abstract",
+		cite: "quote",
+	};
+
+	const iconsJson = JSON.stringify(calloutIcons);
+	const aliasJson = JSON.stringify(calloutAliases);
 
 	return `<!DOCTYPE html>
 <html lang="zh">
@@ -42,27 +118,87 @@ export function buildHtml(title: string, htmlBody: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
-    onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\[',right:'\\\\]',display:true},{left:'\\\\(',right:'\\\\)',display:false}]})"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="markdown-preview-view">
 ${htmlBody}
   </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script>
     (function() {
-      var COPY_ICON = '${svgCopy}';
+      var COPY_ICON  = '${svgCopy}';
       var CHECK_ICON = '${svgCheck}';
+      var ICONS   = ${iconsJson};
+      var ALIASES = ${aliasJson};
+
+      /* ── KaTeX math ── */
+      document.querySelectorAll('.math-d').forEach(function(el) {
+        try { katex.render(el.textContent.trim(), el, { displayMode: true,  throwOnError: false }); } catch(e) {}
+      });
+      document.querySelectorAll('.math-i').forEach(function(el) {
+        try { katex.render(el.textContent.trim(), el, { displayMode: false, throwOnError: false }); } catch(e) {}
+      });
+
+      /* ── Callout icons ── */
+      document.querySelectorAll('.callout').forEach(function(callout) {
+        var iconEl = callout.querySelector('.callout-icon');
+        if (!iconEl) return;
+        var hasSvg = iconEl.querySelector('svg') && iconEl.querySelector('svg').childElementCount > 0;
+        if (hasSvg) return;
+        var type = (callout.getAttribute('data-callout') || 'note').toLowerCase();
+        type = ALIASES[type] || type;
+        var paths = ICONS[type] || ICONS['note'];
+        iconEl.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + paths + '</svg>';
+      });
+
+      /* ── Callout fold/unfold ── */
+      document.querySelectorAll('.callout').forEach(function(callout) {
+        var hasFold = callout.hasAttribute('data-callout-fold') ||
+                      callout.classList.contains('is-collapsed');
+        if (!hasFold) return;
+        var title   = callout.querySelector('.callout-title');
+        var content = callout.querySelector('.callout-content');
+        if (!title) return;
+
+        // Clear any inline display:none Obsidian may have set — CSS handles visibility
+        if (content) content.style.display = '';
+
+        title.style.cursor = 'pointer';
+        title.addEventListener('click', function() {
+          callout.classList.toggle('is-collapsed');
+        });
+      });
+
+      /* ── Code block: language label (via wrapper) + copy button ── */
       document.querySelectorAll('pre').forEach(function(pre) {
+        var code = pre.querySelector('code');
+
+        // Wrap pre so label can escape pre's overflow:auto clipping
+        var wrapper = document.createElement('div');
+        wrapper.className = 'pre-wrapper';
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(pre);
+
+        // Language label — attached to wrapper, not pre
+        if (code) {
+          var m = code.className.match(/language-(\S+)/);
+          if (m && m[1] && m[1] !== 'undefined' && m[1] !== 'text') {
+            var label = document.createElement('span');
+            label.className = 'code-lang';
+            label.textContent = m[1];
+            wrapper.appendChild(label);
+          }
+        }
+
+        // Copy button — stays inside pre (positioned relative to pre)
         var btn = document.createElement('button');
         btn.className = 'copy-btn';
         btn.title = '复制代码';
         btn.innerHTML = COPY_ICON;
         pre.appendChild(btn);
         btn.addEventListener('click', function() {
-          var code = pre.querySelector('code');
           navigator.clipboard.writeText(code ? code.innerText : pre.innerText).then(function() {
             btn.innerHTML = CHECK_ICON;
             setTimeout(function() { btn.innerHTML = COPY_ICON; }, 2000);
@@ -75,6 +211,7 @@ ${htmlBody}
 </html>`;
 }
 
+/* ── CSS ───────────────────────────────────────────────────────────────── */
 export function buildCss(): string {
 	return `/* ── Reset ── */
 *, *::before, *::after { box-sizing: border-box; }
@@ -127,12 +264,7 @@ a:not(.internal-link):not(.footnote-backref)[href^="http"]::after {
 }
 
 /* ── Highlight ── */
-mark {
-  background: #FCEDB5;
-  color: inherit;
-  border-radius: 2px;
-  padding: 0 2px;
-}
+mark { background: #FCEDB5; color: inherit; border-radius: 2px; padding: 0 2px; }
 
 /* ── Inline code ── */
 :not(pre) > code {
@@ -164,6 +296,24 @@ pre code {
   border-radius: 0;
 }
 
+/* ── pre wrapper (allows label to escape overflow:auto clipping) ── */
+.pre-wrapper { position: relative; }
+
+/* ── Code language label ── */
+.code-lang {
+  position: absolute;
+  bottom: 8px; right: 12px;
+  font-size: 11px;
+  font-family: "SF Mono", Menlo, Courier, monospace;
+  color: #bbb;
+  text-transform: lowercase;
+  user-select: none;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.pre-wrapper:hover .code-lang { opacity: 1; }
+
 /* ── Copy button ── */
 .copy-btn {
   position: absolute;
@@ -179,7 +329,7 @@ pre code {
   transition: opacity 0.15s;
   padding: 0;
 }
-pre:hover .copy-btn { opacity: 1; }
+.pre-wrapper:hover .copy-btn { opacity: 1; }
 .copy-btn:hover { background: #f0f0f0; color: #444; }
 
 /* ── Syntax highlighting (Prism GitHub light) ── */
@@ -193,7 +343,15 @@ pre:hover .copy-btn { opacity: 1; }
 .token.deleted { color: #82071e; background: #ffebe9; }
 .token.important, .token.bold { font-weight: bold; }
 .token.italic { font-style: italic; }
-.token.entity { cursor: help; }
+
+/* ── Block math ── */
+.math-d {
+  display: block;
+  text-align: center;
+  margin: 1.2em 0;
+  overflow-x: auto;
+}
+.math-i { display: inline; }
 
 /* ── Blockquote ── */
 blockquote {
@@ -219,29 +377,23 @@ blockquote p { color: #81888D; font-size: 14px; margin: 0; }
 .contains-task-list { list-style: none; padding-left: 0.25em; }
 .task-list-item { display: flex; align-items: baseline; gap: 0.5em; margin: 0.3em 0; }
 .task-list-item-checkbox {
-  appearance: none;
   -webkit-appearance: none;
+  appearance: none;
   flex-shrink: 0;
-  width: 1em; height: 1em;
+  width: 14px; height: 14px;
   border: 1.5px solid ${THEME};
   border-radius: 3px;
   background: #fff;
-  position: relative;
   cursor: default;
   translate: 0 1px;
 }
 .task-list-item-checkbox:checked {
-  background: ${THEME};
+  background-color: ${THEME};
   border-color: ${THEME};
-}
-.task-list-item-checkbox:checked::after {
-  content: '';
-  position: absolute;
-  left: 2px; top: -1px;
-  width: 4px; height: 8px;
-  border: 2px solid #fff;
-  border-top: none; border-left: none;
-  transform: rotate(45deg);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 10 8' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='1,4 3.5,7 9,1' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 72%;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 .task-list-item.is-checked > *:not(.task-list-item-checkbox) { color: #aaa; text-decoration: line-through; }
 
@@ -257,16 +409,8 @@ li { margin: 0.3em 0; }
   margin: 1em 0;
 }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-thead {
-  background: #F3F9F7;
-  border-bottom: 1px solid #DADCDE;
-}
-th, td {
-  color: rgb(107, 107, 107);
-  padding: 10px 13px;
-  border-left: 1px solid #DADCDE;
-  text-align: left;
-}
+thead { background: #F3F9F7; border-bottom: 1px solid #DADCDE; }
+th, td { color: rgb(107, 107, 107); padding: 10px 13px; border-left: 1px solid #DADCDE; }
 th { font-weight: 700; }
 th:first-child, td:first-child { border-left: none; }
 tbody tr { border-bottom: 1px solid #DADCDE; }
@@ -288,9 +432,39 @@ tbody tr:nth-child(even) { background: rgba(101, 166, 146, 0.03); }
   font-weight: 600; font-size: 0.9em;
   color: ${THEME};
 }
-.callout-icon { display: flex; align-items: center; }
-.callout-icon svg { width: 15px; height: 15px; }
-.callout-content { padding: 10px 14px; }
+.callout-icon { display: flex; align-items: center; flex-shrink: 0; }
+.callout-icon svg {
+  width: 16px; height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.callout-title-inner { flex: 1; }
+.callout-fold {
+  margin-left: auto;
+  opacity: 0.5;
+  display: flex; align-items: center;
+  transition: transform 0.2s ease;
+}
+.callout-fold svg { width: 14px; height: 14px; }
+.callout.is-collapsed .callout-fold { transform: rotate(-90deg); }
+.callout-content {
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  color: rgba(0, 0, 0, 0.9);
+  overflow: hidden;
+  max-height: 4000px;
+  opacity: 1;
+  transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.3s ease;
+}
+.callout.is-collapsed .callout-content {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
 .callout-content > p:first-child { margin-top: 0; }
 .callout-content > p:last-child { margin-bottom: 0; }
 
@@ -320,15 +494,12 @@ tbody tr:nth-child(even) { background: rgba(101, 166, 146, 0.03); }
 .callout[data-callout="quote"],.callout[data-callout="cite"] { border-left-color: #999; background: rgba(153,153,153,0.05); }
 .callout[data-callout="quote"] .callout-title,.callout[data-callout="cite"] .callout-title { background: rgba(153,153,153,0.1); color: #888; }
 
-/* ── Block math ── */
-mjx-container[display="true"] { display: block; overflow-x: auto; margin: 1em 0; text-align: center; }
-mjx-container { vertical-align: middle; }
-
 /* ── Footnote ref ── */
 .footnote-ref a, sup.footnote-ref a { color: ${THEME}; font-size: 0.8em; }
 
 /* ── Footnote content ── */
-.footnotes { margin-top: 2em; border-top: 1px dashed #DADCDE; padding-top: 1em; }
+.footnotes { margin-top: 2em; padding-top: 1em; }
+.footnotes > hr { display: none; }
 .footnotes ol { padding-left: 1.5em; }
 .footnotes li, .footnotes p { font-size: 0.75rem; color: #666; margin: 0.3em 0; }
 .footnote-backref { color: #bbb !important; font-size: 0.75em; margin-left: 4px; }
