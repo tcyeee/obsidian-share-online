@@ -1,6 +1,6 @@
 import { Notice, Plugin, TFile } from "obsidian";
 import { ShareOnlineSettings, DEFAULT_SETTINGS, ShareOnlineSettingTab } from "./src/settings";
-import { exportToLocal } from "./src/exporter";
+import { exportToLocal, prepareExport } from "./src/exporter";
 import { uploadToOss } from "./src/oss";
 
 export default class ShareOnlinePlugin extends Plugin {
@@ -42,13 +42,15 @@ export default class ShareOnlinePlugin extends Plugin {
 
 	private async exportFile(file: TFile, toOss = false) {
 		try {
-			const result = await exportToLocal(
-				this.app.vault,
-				file,
-				this.settings.exportPath || DEFAULT_SETTINGS.exportPath
-			);
 			if (toOss) {
+				const result = await prepareExport(this.app.vault, file);
 				await uploadToOss(this.settings, result.noteName, result.html, result.css);
+			} else {
+				await exportToLocal(
+					this.app.vault,
+					file,
+					this.settings.exportPath || DEFAULT_SETTINGS.exportPath
+				);
 			}
 		} catch (err) {
 			new Notice(`导出失败：${(err as Error).message}`);

@@ -37535,16 +37535,21 @@ img { max-width: 100%; border-radius: 4px; }
 }
 
 // src/exporter.ts
-async function exportToLocal(vault, file, exportRoot) {
+async function prepareExport(vault, file) {
   const raw = await vault.read(file);
   const { html: htmlBody, css } = await renderNote(raw);
   const html = buildHtml(file.basename, htmlBody);
-  const folderPath = path2.join(exportRoot, file.basename);
+  const folderName = Date.now().toString(36);
+  return { noteName: folderName, html, css };
+}
+async function exportToLocal(vault, file, exportRoot) {
+  const result = await prepareExport(vault, file);
+  const folderPath = path2.join(exportRoot, result.noteName);
   fs.mkdirSync(folderPath, { recursive: true });
-  fs.writeFileSync(path2.join(folderPath, "index.html"), html, "utf8");
-  fs.writeFileSync(path2.join(folderPath, "style.css"), css, "utf8");
+  fs.writeFileSync(path2.join(folderPath, "index.html"), result.html, "utf8");
+  fs.writeFileSync(path2.join(folderPath, "style.css"), result.css, "utf8");
   new import_obsidian2.Notice(`\u5DF2\u5BFC\u51FA\u5230\u672C\u5730\uFF1A${folderPath}`);
-  return { noteName: file.basename, html, css };
+  return result;
 }
 
 // src/oss.ts
@@ -37609,13 +37614,15 @@ var ShareOnlinePlugin = class extends import_obsidian4.Plugin {
   }
   async exportFile(file, toOss = false) {
     try {
-      const result = await exportToLocal(
-        this.app.vault,
-        file,
-        this.settings.exportPath || DEFAULT_SETTINGS.exportPath
-      );
       if (toOss) {
+        const result = await prepareExport(this.app.vault, file);
         await uploadToOss(this.settings, result.noteName, result.html, result.css);
+      } else {
+        await exportToLocal(
+          this.app.vault,
+          file,
+          this.settings.exportPath || DEFAULT_SETTINGS.exportPath
+        );
       }
     } catch (err) {
       new import_obsidian4.Notice(`\u5BFC\u51FA\u5931\u8D25\uFF1A${err.message}`);
