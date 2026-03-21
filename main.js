@@ -36196,13 +36196,13 @@ function buildHtml(title, htmlBody) {
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <button class="toc-toggle" id="toc-toggle" title="\u76EE\u5F55">
+  <button class="toc-toggle" id="toc-toggle" title="OUTLINE">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
   </button>
   <div class="toc-backdrop" id="toc-backdrop"></div>
   <nav class="toc-sidebar" id="toc-sidebar">
     <div class="toc-header">
-      <span class="toc-title">\u76EE\u5F55</span>
+      <span class="toc-title">OUTLINE</span>
       <button class="toc-close" id="toc-close" title="\u5173\u95ED">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -36353,6 +36353,7 @@ ${htmlBody}
         a.addEventListener('click', function() {
           sidebar.classList.remove('is-open');
           document.getElementById('toc-backdrop').classList.remove('is-visible');
+          document.body.style.overflow = '';
         });
       });
     })();
@@ -36363,8 +36364,16 @@ ${htmlBody}
       var sidebar  = document.getElementById('toc-sidebar');
       var backdrop = document.getElementById('toc-backdrop');
       var closeBtn = document.getElementById('toc-close');
-      function openToc()  { sidebar.classList.add('is-open');    backdrop.classList.add('is-visible'); }
-      function closeToc() { sidebar.classList.remove('is-open'); backdrop.classList.remove('is-visible'); }
+      function openToc()  {
+        sidebar.classList.add('is-open');
+        backdrop.classList.add('is-visible');
+        document.body.style.overflow = 'hidden';
+      }
+      function closeToc() {
+        sidebar.classList.remove('is-open');
+        backdrop.classList.remove('is-visible');
+        document.body.style.overflow = '';
+      }
       if (toggle)   toggle.addEventListener('click', openToc);
       if (backdrop) backdrop.addEventListener('click', closeToc);
       if (closeBtn) closeBtn.addEventListener('click', closeToc);
@@ -36450,14 +36459,14 @@ body {
     height: 100dvh;
     max-height: none;
     background: #fff;
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
+    box-shadow: none;
     transform: translateX(-100%);
-    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.28s;
     z-index: 200;
     overflow-y: auto;
     padding: 0;
   }
-  .toc-sidebar.is-open { transform: translateX(0); }
+  .toc-sidebar.is-open { transform: translateX(0); box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15); }
   .toc-header {
     position: sticky;
     top: 0;
@@ -36624,7 +36633,7 @@ pre code {
 .copy-btn:hover { background: #f0f0f0; color: #444; }
 
 /* \u2500\u2500 Syntax highlighting (Prism GitHub light) \u2500\u2500 */
-.token.comment, .token.prolog, .token.doctype, .token.cdata { color: #6e7781; font-style: italic; }
+.token.comment, .token.prolog, .token.doctype, .token.cdata, .token.shebang { color: #6e7781; font-style: italic; font-weight: normal; }
 .token.string, .token.attr-value, .token.char, .token.inserted { color: #0a3069; }
 .token.punctuation, .token.operator { color: #24292f; }
 .token.number, .token.boolean, .token.variable, .token.constant, .token.regex { color: #0550ae; }

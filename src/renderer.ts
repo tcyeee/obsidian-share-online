@@ -278,6 +278,7 @@ ${htmlBody}
         a.addEventListener('click', function() {
           sidebar.classList.remove('is-open');
           document.getElementById('toc-backdrop').classList.remove('is-visible');
+          document.body.style.overflow = '';
         });
       });
     })();
@@ -288,8 +289,16 @@ ${htmlBody}
       var sidebar  = document.getElementById('toc-sidebar');
       var backdrop = document.getElementById('toc-backdrop');
       var closeBtn = document.getElementById('toc-close');
-      function openToc()  { sidebar.classList.add('is-open');    backdrop.classList.add('is-visible'); }
-      function closeToc() { sidebar.classList.remove('is-open'); backdrop.classList.remove('is-visible'); }
+      function openToc()  {
+        sidebar.classList.add('is-open');
+        backdrop.classList.add('is-visible');
+        document.body.style.overflow = 'hidden';
+      }
+      function closeToc() {
+        sidebar.classList.remove('is-open');
+        backdrop.classList.remove('is-visible');
+        document.body.style.overflow = '';
+      }
       if (toggle)   toggle.addEventListener('click', openToc);
       if (backdrop) backdrop.addEventListener('click', closeToc);
       if (closeBtn) closeBtn.addEventListener('click', closeToc);
@@ -377,14 +386,14 @@ body {
     height: 100dvh;
     max-height: none;
     background: #fff;
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
+    box-shadow: none;
     transform: translateX(-100%);
-    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.28s;
     z-index: 200;
     overflow-y: auto;
     padding: 0;
   }
-  .toc-sidebar.is-open { transform: translateX(0); }
+  .toc-sidebar.is-open { transform: translateX(0); box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15); }
   .toc-header {
     position: sticky;
     top: 0;
@@ -551,7 +560,7 @@ pre code {
 .copy-btn:hover { background: #f0f0f0; color: #444; }
 
 /* ── Syntax highlighting (Prism GitHub light) ── */
-.token.comment, .token.prolog, .token.doctype, .token.cdata { color: #6e7781; font-style: italic; }
+.token.comment, .token.prolog, .token.doctype, .token.cdata, .token.shebang { color: #6e7781; font-style: italic; font-weight: normal; }
 .token.string, .token.attr-value, .token.char, .token.inserted { color: #0a3069; }
 .token.punctuation, .token.operator { color: #24292f; }
 .token.number, .token.boolean, .token.variable, .token.constant, .token.regex { color: #0550ae; }
