@@ -171,7 +171,10 @@ export async function renderNote(
   // Restore plugin code block language labels (strip the export-raw- prefix)
   restorePluginCodeLangs(el);
 
-  // Replace base embed placeholders (data-base-embed attr) with real tables
+  // Images map is created here so base renderers can register banner images into it
+  const images = new Map<string, TFile>();
+
+  // Replace base embed placeholders (data-base-embed attr) with real tables/cards
   const basePlaceholders = Array.from(el.querySelectorAll<HTMLElement>("[data-base-embed]"));
   for (const placeholder of basePlaceholders) {
     const name = placeholder.getAttribute("data-base-embed") ?? "";
@@ -180,7 +183,7 @@ export async function renderNote(
     ) as TFile | undefined;
     const temp = document.createElement("div");
     if (baseFile) {
-      temp.innerHTML = await renderBaseAsTable(app, baseFile);
+      temp.innerHTML = await renderBaseAsTable(app, baseFile, images);
     } else {
       temp.innerHTML = `<p class="base-error">Base 未找到: ${name}</p>`;
     }
@@ -199,7 +202,7 @@ export async function renderNote(
     ) as TFile | undefined;
     const temp = document.createElement("div");
     if (baseFile) {
-      temp.innerHTML = await renderBaseAsTable(app, baseFile);
+      temp.innerHTML = await renderBaseAsTable(app, baseFile, images);
     } else {
       temp.innerHTML = `<p class="base-error">Base 未找到: ${src}</p>`;
     }
@@ -215,11 +218,8 @@ export async function renderNote(
     wrapper.appendChild(table);
   });
 
-  // Process imgs code blocks: parse paths, build gallery, register images
-  const images = new Map<string, TFile>();
+  // Process imgs code blocks, then collect remaining images (wiki embeds, markdown images)
   processImgsBlocks(app, file, el, images);
-
-  // Collect remaining images (wiki embeds, markdown images) into same map
   collectImages(app, file, el, images);
 
   return { html: el.innerHTML, css: buildCss(), images };
@@ -965,6 +965,44 @@ em { font-style: italic; }
 .base-error { color: #E06C75; font-size: 13px; margin: 0.8em 0; }
 .base-link  { color: ${THEME}; text-decoration: none; font-size: inherit; }
 .base-link:hover { text-decoration: underline; }
+
+/* ── Base cards / list view ── */
+.base-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 1em 0;
+}
+.base-card {
+  border: 1px solid #DADCDE;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+.base-card-banner {
+  display: block;
+  width: 100%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.base-card-body {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.base-card-row {
+  font-size: 0.88em;
+  line-height: 1.45;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ── Dataview list ── */
 ul.dv-list { padding-left: 1.5em; margin: 0.5em 0; }

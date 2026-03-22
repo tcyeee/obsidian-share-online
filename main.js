@@ -17193,8 +17193,8 @@ var require_aliyun_oss_sdk = __commonJS({
         }, { "get-intrinsic": 390, "gopd": 391, "has-property-descriptors": 392 }], 385: [function(require2, module4, exports3) {
           "use strict";
           var matchHtmlRegExp = /["'&<>]/;
-          module4.exports = escapeHtml3;
-          function escapeHtml3(string) {
+          module4.exports = escapeHtml2;
+          function escapeHtml2(string) {
             var str = "" + string;
             var match = matchHtmlRegExp.exec(str);
             if (!match) {
@@ -36029,6 +36029,7 @@ var path = __toESM(require("path"));
 var os = __toESM(require("os"));
 var DEFAULT_SETTINGS = {
   exportPath: path.join(os.homedir(), "Desktop"),
+  includeLinkedNotes: false,
   ossRegion: "",
   ossBucket: "",
   ossAccessKeyId: "",
@@ -36044,6 +36045,13 @@ var ShareOnlineSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.createEl("h3", { text: "\u5BFC\u51FA\u8BBE\u7F6E" });
+    new import_obsidian.Setting(containerEl).setName("\u5305\u542B\u4E8C\u7EA7\u7B14\u8BB0").setDesc("\u5BFC\u51FA\u5355\u4E2A\u7B14\u8BB0\u65F6\uFF0C\u540C\u65F6\u5BFC\u51FA\u8BE5\u7B14\u8BB0\u4E2D\u94FE\u63A5\u7684\u6240\u6709\u4E8C\u7EA7\u7B14\u8BB0").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.includeLinkedNotes).onChange(async (value) => {
+        this.plugin.settings.includeLinkedNotes = value;
+        await this.plugin.saveSettings();
+      })
+    );
     containerEl.createEl("h3", { text: "\u672C\u5730\u5BFC\u51FA" });
     new import_obsidian.Setting(containerEl).setName("\u5BFC\u51FA\u8DEF\u5F84").setDesc("\u7B14\u8BB0\u5BFC\u51FA\u7684\u76EE\u6807\u6587\u4EF6\u5939\uFF0C\u9ED8\u8BA4\u4E3A\u684C\u9762").addText(
       (text) => text.setPlaceholder(DEFAULT_SETTINGS.exportPath).setValue(this.plugin.settings.exportPath).onChange(async (value) => {
@@ -36103,6 +36111,85 @@ var import_obsidian3 = require("obsidian");
 
 // src/base-renderer.ts
 var import_obsidian2 = require("obsidian");
+
+// src/imgs-renderer.ts
+function registerImage(imgFile, images) {
+  for (const [name2, f] of images) {
+    if (f.path === imgFile.path)
+      return name2;
+  }
+  let name = imgFile.name;
+  if (images.has(name)) {
+    const ext = imgFile.extension ? `.${imgFile.extension}` : "";
+    const base = imgFile.basename;
+    let i = 1;
+    while (images.has(`${base}_${i}${ext}`))
+      i++;
+    name = `${base}_${i}${ext}`;
+  }
+  images.set(name, imgFile);
+  return name;
+}
+function parseImgsBlock(raw) {
+  const config = { border: false, shadow: false };
+  const paths = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed)
+      continue;
+    if (trimmed.endsWith(";;")) {
+      const params = trimmed.slice(0, -2);
+      for (const pair of params.split("&")) {
+        const [key, val] = pair.split("=").map((s) => s.trim().toLowerCase());
+        if (key === "border")
+          config.border = val === "true";
+        if (key === "shadow")
+          config.shadow = val === "true";
+      }
+      continue;
+    }
+    const mdMatch = trimmed.match(/^!\[.*?\]\(([^)]+)\)$/);
+    if (mdMatch) {
+      paths.push(mdMatch[1].replace(/^\//, ""));
+      continue;
+    }
+    if (trimmed.startsWith("/") || trimmed.includes(".")) {
+      paths.push(trimmed.replace(/^\//, ""));
+    }
+  }
+  return { config, paths };
+}
+function processImgsBlocks(app, sourceFile, el, images) {
+  el.querySelectorAll("code.language-imgs").forEach((code) => {
+    var _a, _b, _c;
+    const pre = (_a = code.closest("pre")) != null ? _a : code.parentElement;
+    if (!pre)
+      return;
+    const { config, paths } = parseImgsBlock((_b = code.textContent) != null ? _b : "");
+    const gallery = document.createElement("div");
+    gallery.className = "imgs-gallery";
+    if (config.border)
+      gallery.dataset.border = "true";
+    if (config.shadow)
+      gallery.dataset.shadow = "true";
+    for (const vaultPath of paths) {
+      const imgFile = (_c = app.vault.getAbstractFileByPath(vaultPath)) != null ? _c : app.metadataCache.getFirstLinkpathDest(vaultPath, sourceFile.path);
+      const img = document.createElement("img");
+      if (imgFile) {
+        const name = registerImage(imgFile, images);
+        img.setAttribute("src", `images/${name}`);
+        img.setAttribute("alt", imgFile.name);
+      } else {
+        img.setAttribute("src", vaultPath);
+        img.setAttribute("alt", vaultPath);
+      }
+      gallery.appendChild(img);
+    }
+    pre.replaceWith(gallery);
+  });
+}
+
+// src/base-renderer.ts
 function splitTopLevelArgs(s) {
   const args = [];
   let depth = 0, cur = "", inStr = false, strChar = "";
@@ -36239,6 +36326,10 @@ function evalExpr(expr, ctx) {
     return String(ctx.stat.mtime);
   if (expr === "file.backlinks")
     return "";
+  if (expr.startsWith("note.")) {
+    const v2 = ctx.fm[expr.slice(5)];
+    return v2 !== void 0 && v2 !== null ? escapeHtml(String(v2)) : "";
+  }
   const v = ctx.fm[expr];
   return v !== void 0 && v !== null ? escapeHtml(String(v)) : "";
 }
@@ -36270,8 +36361,8 @@ function colLabel(col, properties) {
   const bare = col.startsWith("formula.") ? col.slice(8) : col.startsWith("file.") ? col.slice(5) : col;
   return (_h = (_g = (_e = (_c = (_a = properties == null ? void 0 : properties["note." + bare]) == null ? void 0 : _a.displayName) != null ? _c : (_b = properties == null ? void 0 : properties[bare]) == null ? void 0 : _b.displayName) != null ? _e : (_d = properties == null ? void 0 : properties["note." + col]) == null ? void 0 : _d.displayName) != null ? _g : (_f = properties == null ? void 0 : properties[col]) == null ? void 0 : _f.displayName) != null ? _h : bare;
 }
-async function renderBaseAsTable(app, baseFile) {
-  var _a, _b, _c, _d, _e;
+async function renderBaseAsTable(app, baseFile, images) {
+  var _a, _b, _c, _d, _e, _f;
   const raw = await app.vault.read(baseFile);
   let config;
   try {
@@ -36325,7 +36416,11 @@ async function renderBaseAsTable(app, baseFile) {
     matched = matched.slice(0, view.limit);
   if (matched.length === 0)
     return `<div class="base-empty">\uFF08\u65E0\u5339\u914D\u8BB0\u5F55\uFF09</div>`;
-  const order = ((_e = view.order) == null ? void 0 : _e.length) ? view.order : Object.keys(formulas).map((k) => `formula.${k}`);
+  const viewType = ((_e = view.type) != null ? _e : "table").toLowerCase();
+  if (viewType === "cards" || viewType === "list") {
+    return renderCards(app, baseFile, config, view, matched, formulas, properties, vaultName, images);
+  }
+  const order = ((_f = view.order) == null ? void 0 : _f.length) ? view.order : Object.keys(formulas).map((k) => `formula.${k}`);
   const thead = `<tr>${order.map((c) => `<th>${colLabel(c, properties)}</th>`).join("")}</tr>`;
   const tbody = matched.map((f) => {
     var _a2, _b2;
@@ -36361,6 +36456,58 @@ ${tbody}
 </table>
 </div>`;
 }
+function renderCards(app, baseFile, config, view, matched, formulas, properties, vaultName, images) {
+  var _a, _b, _c, _d, _e;
+  const cardSize = (_a = view.cardSize) != null ? _a : 200;
+  const imageAspectRatio = (_b = view.imageAspectRatio) != null ? _b : 0.5;
+  const imgHeight = Math.round(cardSize * imageAspectRatio);
+  const imgFmKey = ((_c = view.image) == null ? void 0 : _c.startsWith("note.")) ? view.image.slice(5) : (_d = view.image) != null ? _d : "";
+  const order = ((_e = view.order) == null ? void 0 : _e.length) ? view.order : Object.keys(formulas).map((k) => `formula.${k}`);
+  const cards = matched.map((f) => {
+    var _a2, _b2, _c2, _d2;
+    const fm = (_b2 = (_a2 = app.metadataCache.getFileCache(f)) == null ? void 0 : _a2.frontmatter) != null ? _b2 : {};
+    const s = { mtime: f.stat.mtime, ctime: f.stat.ctime };
+    const ctx = { file: f, fm, stat: s, vaultName };
+    let bannerHtml = "";
+    if (imgFmKey) {
+      const raw = String((_c2 = fm[imgFmKey]) != null ? _c2 : "").replace(/^\//, "");
+      if (raw) {
+        const imgFile = (_d2 = app.vault.getAbstractFileByPath(raw)) != null ? _d2 : app.metadataCache.getFirstLinkpathDest(raw, baseFile.path);
+        if (imgFile) {
+          const src = images ? `images/${registerImage(imgFile, images)}` : `app://local/${encodeURIComponent(imgFile.path)}`;
+          bannerHtml = `<img class="base-card-banner" src="${src}" alt="${escapeHtml(imgFile.name)}" style="height:${imgHeight}px">`;
+        }
+      }
+    }
+    const bodyHtml = order.map((col) => {
+      let val = "";
+      if (col.startsWith("formula.")) {
+        const key = col.slice(8);
+        val = formulas[key] ? evalExpr(formulas[key], ctx) : "";
+      } else if (col.startsWith("note.")) {
+        const v = fm[col.slice(5)];
+        val = v !== void 0 ? escapeHtml(String(v)) : "";
+      } else if (col === "file.name") {
+        val = escapeHtml(f.name);
+      } else if (col === "file.basename") {
+        val = escapeHtml(f.basename);
+      } else if (col === "file.mtime") {
+        val = formatDateValue(f.stat.mtime);
+      } else if (col === "file.ctime") {
+        val = formatDateValue(f.stat.ctime);
+      } else {
+        const v = fm[col];
+        val = v !== void 0 ? escapeHtml(String(v)) : "";
+      }
+      if (!val)
+        return "";
+      const label = colLabel(col, properties);
+      return `<div class="base-card-row" title="${escapeHtml(label)}">${val}</div>`;
+    }).join("");
+    return `<div class="base-card" style="width:${cardSize}px">${bannerHtml}${bodyHtml ? `<div class="base-card-body">${bodyHtml}</div>` : ""}</div>`;
+  }).join("\n");
+  return `<div class="base-cards">${cards}</div>`;
+}
 function resolveBaseEmbeds(content) {
   return content.replace(
     /!\[\[([^\]]+\.base)\]\]/g,
@@ -36370,357 +36517,6 @@ function resolveBaseEmbeds(content) {
 
 `
   );
-}
-
-// src/dataview-renderer.ts
-function escapeHtml2(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-function formatDate(val, fmt = "YYYY-MM-DD") {
-  let d;
-  if (typeof val === "number")
-    d = new Date(val);
-  else if (/^\d{10,}$/.test(val))
-    d = new Date(parseInt(val));
-  else
-    d = new Date(val);
-  if (isNaN(d.getTime()))
-    return String(val);
-  const tokens = {
-    YYYY: String(d.getFullYear()),
-    MM: String(d.getMonth() + 1).padStart(2, "0"),
-    DD: String(d.getDate()).padStart(2, "0"),
-    HH: String(d.getHours()).padStart(2, "0"),
-    mm: String(d.getMinutes()).padStart(2, "0"),
-    ss: String(d.getSeconds()).padStart(2, "0")
-  };
-  return fmt.replace(/YYYY|MM|DD|HH|mm|ss/g, (t) => {
-    var _a;
-    return (_a = tokens[t]) != null ? _a : t;
-  });
-}
-function splitTopLevel(s, sep) {
-  const parts = [];
-  let depth = 0, inStr = false, strChar = "", cur = "";
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      cur += c;
-      if (c === strChar)
-        inStr = false;
-    } else if (c === '"' || c === "'") {
-      inStr = true;
-      strChar = c;
-      cur += c;
-    } else if (c === "(") {
-      depth++;
-      cur += c;
-    } else if (c === ")") {
-      depth--;
-      cur += c;
-    } else if (depth === 0 && s.slice(i).toLowerCase().startsWith(sep.toLowerCase())) {
-      parts.push(cur.trim());
-      cur = "";
-      i += sep.length - 1;
-    } else {
-      cur += c;
-    }
-  }
-  if (cur.trim())
-    parts.push(cur.trim());
-  return parts;
-}
-function parseColumns(raw) {
-  if (!raw.trim())
-    return [];
-  return splitTopLevel(raw, ",").map((part) => {
-    var _a;
-    const asM = (_a = part.match(/^([\s\S]+?)\s+AS\s+"([^"]+)"$/i)) != null ? _a : part.match(/^([\s\S]+?)\s+AS\s+(\S+)$/i);
-    return asM ? { expr: asM[1].trim(), alias: asM[2] } : { expr: part.trim(), alias: "" };
-  });
-}
-function parseDataviewQuery(raw) {
-  const CLAUSE = /^(TABLE|LIST|TASK|FROM|WHERE|SORT BY|SORT|LIMIT|GROUP BY|FLATTEN)\b/i;
-  const lines = raw.trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (!lines.length)
-    return null;
-  const segments = [];
-  for (const line of lines) {
-    if (CLAUSE.test(line) || segments.length === 0)
-      segments.push(line);
-    else
-      segments[segments.length - 1] += " " + line;
-  }
-  let type = "table";
-  let withoutId = false;
-  let columns = [];
-  let from = "", where = "";
-  const sort = [];
-  let limit;
-  for (const seg of segments) {
-    if (/^TABLE\b/i.test(seg)) {
-      type = "table";
-      let rest = seg.slice(5).trim();
-      if (/^WITHOUT\s+ID\b/i.test(rest)) {
-        withoutId = true;
-        rest = rest.replace(/^WITHOUT\s+ID\s*/i, "");
-      }
-      columns = parseColumns(rest);
-    } else if (/^LIST\b/i.test(seg)) {
-      type = "list";
-      const field = seg.slice(4).trim();
-      if (field)
-        columns = [{ expr: field, alias: "" }];
-    } else if (/^TASK\b/i.test(seg)) {
-      type = "task";
-    } else if (/^FROM\b/i.test(seg)) {
-      from = seg.slice(4).trim();
-    } else if (/^WHERE\b/i.test(seg)) {
-      where = seg.slice(5).trim();
-    } else if (/^SORT(?:\s+BY)?\b/i.test(seg)) {
-      const sortStr = seg.replace(/^SORT(?:\s+BY)?\s*/i, "");
-      for (const part of splitTopLevel(sortStr, ",")) {
-        const m = part.trim().match(/^([\s\S]+?)\s+(ASC|DESC)$/i);
-        if (m)
-          sort.push({ field: m[1].trim(), desc: m[2].toUpperCase() === "DESC" });
-        else
-          sort.push({ field: part.trim(), desc: false });
-      }
-    } else if (/^LIMIT\b/i.test(seg)) {
-      const n = parseInt(seg.replace(/^LIMIT\s*/i, ""));
-      if (!isNaN(n))
-        limit = n;
-    }
-  }
-  return { type, withoutId, columns, from, where, sort, limit };
-}
-function getFileTags(meta) {
-  var _a, _b, _c;
-  const bodyTags = (_b = (_a = meta == null ? void 0 : meta.tags) == null ? void 0 : _a.map((t) => t.tag.replace(/^#/, "").toLowerCase())) != null ? _b : [];
-  const fmTags = (_c = meta == null ? void 0 : meta.frontmatter) == null ? void 0 : _c.tags;
-  const fmList = Array.isArray(fmTags) ? fmTags : fmTags ? [String(fmTags)] : [];
-  return /* @__PURE__ */ new Set([...bodyTags, ...fmList.map((t) => t.toLowerCase())]);
-}
-function matchesSource(src, file, meta) {
-  var _a;
-  src = src.trim();
-  if (!src)
-    return true;
-  const orParts = splitTopLevel(src, " OR ");
-  if (orParts.length > 1)
-    return orParts.some((p) => matchesSource(p, file, meta));
-  const andParts = splitTopLevel(src, " AND ");
-  if (andParts.length > 1)
-    return andParts.every((p) => matchesSource(p, file, meta));
-  if (/^NOT\s+/i.test(src))
-    return !matchesSource(src.slice(3).trim(), file, meta);
-  if (src.startsWith("-"))
-    return !matchesSource(src.slice(1).trim(), file, meta);
-  const tagM = src.match(/^#(.+)$/);
-  if (tagM)
-    return getFileTags(meta).has(tagM[1].toLowerCase());
-  const folderM = src.match(/^"([^"]+)"$/);
-  if (folderM) {
-    const folder = folderM[1].replace(/\/$/, "");
-    return file.path.startsWith(folder + "/") || ((_a = file.parent) == null ? void 0 : _a.path) === folder;
-  }
-  return true;
-}
-function getFieldRaw(expr, file, meta) {
-  var _a, _b;
-  const fm = (_a = meta == null ? void 0 : meta.frontmatter) != null ? _a : {};
-  if (expr === "file.name")
-    return file.name;
-  if (expr === "file.basename")
-    return file.basename;
-  if (expr === "file.path")
-    return file.path;
-  if (expr === "file.ctime")
-    return file.stat.ctime;
-  if (expr === "file.mtime")
-    return file.stat.mtime;
-  if (expr === "file.size")
-    return file.stat.size;
-  if (expr === "file.ext")
-    return file.extension;
-  return (_b = fm[expr]) != null ? _b : fm[expr.toLowerCase()];
-}
-function evalCondition(cond, file, meta) {
-  var _a;
-  cond = cond.trim();
-  if (!cond)
-    return true;
-  const orParts = splitTopLevel(cond, " OR ");
-  if (orParts.length > 1)
-    return orParts.some((c) => evalCondition(c, file, meta));
-  const andParts = splitTopLevel(cond, " AND ");
-  if (andParts.length > 1)
-    return andParts.every((c) => evalCondition(c, file, meta));
-  if (/^!\s*/.test(cond) || /^NOT\s+/i.test(cond))
-    return !evalCondition(cond.replace(/^!?\s*NOT\s+/i, "").trim(), file, meta);
-  const containsM = cond.match(/^contains\s*\(\s*([\w.]+)\s*,\s*"([^"]+)"\s*\)$/i);
-  if (containsM) {
-    const val = getFieldRaw(containsM[1], file, meta);
-    const target = containsM[2].replace(/^#/, "").toLowerCase();
-    if (Array.isArray(val))
-      return val.map(String).some((v) => v.toLowerCase().includes(target));
-    return String(val != null ? val : "").toLowerCase().includes(target);
-  }
-  const notNullM = cond.match(/^([\w.]+)\s*!=\s*(null|"")$/i);
-  if (notNullM) {
-    const val = getFieldRaw(notNullM[1], file, meta);
-    return val != null && val !== "";
-  }
-  const eqM = cond.match(/^([\w.]+)\s*=\s*"?([^"]*)"?$/i);
-  if (eqM) {
-    return String((_a = getFieldRaw(eqM[1], file, meta)) != null ? _a : "") === eqM[2];
-  }
-  if (/^[\w.]+$/.test(cond)) {
-    const val = getFieldRaw(cond, file, meta);
-    return val != null && val !== "" && val !== false;
-  }
-  return true;
-}
-function renderField(expr, file, meta, vault) {
-  var _a, _b;
-  expr = expr.trim();
-  const fm = (_a = meta == null ? void 0 : meta.frontmatter) != null ? _a : {};
-  const dfM = expr.match(/^dateformat\s*\(\s*([\s\S]+?)\s*,\s*"([^"]+)"\s*\)$/i);
-  if (dfM) {
-    const inner = renderField(dfM[1], file, meta, vault);
-    return formatDate(inner, dfM[2]);
-  }
-  const dateM = expr.match(/^date\s*\(\s*([\s\S]+?)\s*\)$/i);
-  if (dateM)
-    return formatDate(renderField(dateM[1], file, meta, vault));
-  if (expr === "file.link" || expr === "this.file.link") {
-    const href = `obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(file.path)}`;
-    return `<a href="${href}" class="base-link">${escapeHtml2(file.basename)}</a>`;
-  }
-  if (expr === "file.name")
-    return escapeHtml2(file.name);
-  if (expr === "file.basename")
-    return escapeHtml2(file.basename);
-  if (expr === "file.path")
-    return escapeHtml2(file.path);
-  if (expr === "file.ext")
-    return escapeHtml2(file.extension);
-  if (expr === "file.size")
-    return String(file.stat.size);
-  if (expr === "file.ctime")
-    return formatDate(file.stat.ctime);
-  if (expr === "file.mtime")
-    return formatDate(file.stat.mtime);
-  if (expr === "file.tags") {
-    const tags = [...getFileTags(meta)].map((t) => "#" + t);
-    return escapeHtml2(tags.join(", "));
-  }
-  const val = (_b = fm[expr]) != null ? _b : fm[expr.toLowerCase()];
-  if (val == null)
-    return "";
-  if (Array.isArray(val))
-    return escapeHtml2(val.join(", "));
-  const s = String(val);
-  if (/^\d{4}-\d{2}-\d{2}(T|\s|$)/.test(s))
-    return formatDate(s);
-  return escapeHtml2(s);
-}
-function defaultLabel(expr) {
-  const map = {
-    "file.link": "File",
-    "file.name": "Name",
-    "file.basename": "Name",
-    "file.path": "Path",
-    "file.ctime": "Created",
-    "file.mtime": "Modified",
-    "file.size": "Size",
-    "file.tags": "Tags",
-    "file.ext": "Ext"
-  };
-  if (map[expr])
-    return map[expr];
-  return expr.charAt(0).toUpperCase() + expr.slice(1);
-}
-function sortFiles(files, sortSpec, app, vault) {
-  if (!sortSpec.length)
-    return files;
-  return [...files].sort((a, b) => {
-    for (const { field, desc } of sortSpec) {
-      const ma = app.metadataCache.getFileCache(a);
-      const mb = app.metadataCache.getFileCache(b);
-      const va = renderField(field, a, ma, vault);
-      const vb = renderField(field, b, mb, vault);
-      const cmp = va < vb ? -1 : va > vb ? 1 : 0;
-      if (cmp !== 0)
-        return desc ? -cmp : cmp;
-    }
-    return 0;
-  });
-}
-function renderTable(files, query, app, vault) {
-  const cols = query.withoutId ? query.columns : [{ expr: "file.link", alias: "File" }, ...query.columns];
-  const headers = cols.map((c) => c.alias || defaultLabel(c.expr));
-  const thead = `<tr>${headers.map((h) => `<th>${escapeHtml2(h)}</th>`).join("")}</tr>`;
-  const tbody = files.map((f) => {
-    const meta = app.metadataCache.getFileCache(f);
-    const cells = cols.map((c) => `<td>${renderField(c.expr, f, meta, vault)}</td>`);
-    return `<tr>${cells.join("")}</tr>`;
-  }).join("\n");
-  return `<div class="table-wrapper">
-<table>
-<thead>${thead}</thead>
-<tbody>
-${tbody}
-</tbody>
-</table>
-</div>`;
-}
-function renderList(files, query, vault, app) {
-  const displayCol = query.columns[0];
-  const items = files.map((f) => {
-    const meta = app.metadataCache.getFileCache(f);
-    const link = `obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(f.path)}`;
-    const label = displayCol ? renderField(displayCol.expr, f, meta, vault) : `<a href="${link}" class="base-link">${escapeHtml2(f.basename)}</a>`;
-    return `<li>${label}</li>`;
-  }).join("\n");
-  return `<ul class="dv-list">
-${items}
-</ul>`;
-}
-function renderDataviewQuery(app, sourceFile, queryText) {
-  const query = parseDataviewQuery(queryText);
-  if (!query)
-    return `<div class="base-error">\u65E0\u6CD5\u89E3\u6790 Dataview \u67E5\u8BE2</div>`;
-  if (query.type === "task") {
-    return `<pre><code class="language-dataview">${escapeHtml2(queryText)}</code></pre>`;
-  }
-  const vault = app.vault.getName();
-  let files = app.vault.getMarkdownFiles().filter((f) => {
-    const meta = app.metadataCache.getFileCache(f);
-    return matchesSource(query.from, f, meta) && evalCondition(query.where, f, meta);
-  });
-  files = sortFiles(files, query.sort, app, vault);
-  if (query.limit !== void 0)
-    files = files.slice(0, query.limit);
-  if (files.length === 0)
-    return `<div class="base-empty">\uFF08\u65E0\u5339\u914D\u7ED3\u679C\uFF09</div>`;
-  return query.type === "list" ? renderList(files, query, vault, app) : renderTable(files, query, vault, app);
-}
-function processDataviewBlocks(app, sourceFile, el) {
-  var _a, _b;
-  const codeEls = Array.from(
-    el.querySelectorAll("code.language-dataview")
-  );
-  for (const codeEl of codeEls) {
-    const pre = (_a = codeEl.closest("pre")) != null ? _a : codeEl.parentElement;
-    if (!pre)
-      continue;
-    const queryText = (_b = codeEl.textContent) != null ? _b : "";
-    const html = renderDataviewQuery(app, sourceFile, queryText);
-    const temp = document.createElement("div");
-    temp.innerHTML = html;
-    pre.replaceWith(...Array.from(temp.childNodes));
-  }
 }
 
 // src/renderer.ts
@@ -36746,24 +36542,6 @@ function extractMath(content) {
   });
   processed = processed.replace(/\x00C(\d+)\x00/g, (_, i) => codes[+i]);
   return { processed, entries };
-}
-// src/imgs-renderer.ts
-function registerImage(imgFile, images) {
-  for (const [name2, f] of images) {
-    if (f.path === imgFile.path)
-      return name2;
-  }
-  let name = imgFile.name;
-  if (images.has(name)) {
-    const ext = imgFile.extension ? `.${imgFile.extension}` : "";
-    const base = imgFile.basename;
-    let i = 1;
-    while (images.has(`${base}_${i}${ext}`))
-      i++;
-    name = `${base}_${i}${ext}`;
-  }
-  images.set(name, imgFile);
-  return name;
 }
 function collectImages(app, sourceFile, el, images = /* @__PURE__ */ new Map()) {
   const vaultBasePath = app.vault.adapter instanceof import_obsidian3.FileSystemAdapter ? app.vault.adapter.basePath : "";
@@ -36801,63 +36579,11 @@ function collectImages(app, sourceFile, el, images = /* @__PURE__ */ new Map()) 
   });
   return images;
 }
-function parseImgsBlock(raw) {
-  const config = { border: false, shadow: false };
-  const paths = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    if (trimmed.endsWith(";;")) {
-      const params = trimmed.slice(0, -2);
-      for (const pair of params.split("&")) {
-        const [key, val] = pair.split("=").map((s) => s.trim().toLowerCase());
-        if (key === "border") config.border = val === "true";
-        if (key === "shadow") config.shadow = val === "true";
-      }
-      continue;
-    }
-    const mdMatch = trimmed.match(/^!\[.*?\]\(([^)]+)\)$/);
-    if (mdMatch) {
-      paths.push(mdMatch[1].replace(/^\//, ""));
-      continue;
-    }
-    if (trimmed.startsWith("/") || trimmed.includes(".")) {
-      paths.push(trimmed.replace(/^\//, ""));
-    }
-  }
-  return { config, paths };
-}
-function processImgsBlocks(app, sourceFile, el, images) {
-  el.querySelectorAll("code.language-imgs").forEach((code) => {
-    var _a;
-    const pre = (_a = code.closest("pre")) != null ? _a : code.parentElement;
-    if (!pre) return;
-    const { config, paths } = parseImgsBlock(code.textContent ?? "");
-    const gallery = document.createElement("div");
-    gallery.className = "imgs-gallery";
-    if (config.border) gallery.dataset.border = "true";
-    if (config.shadow) gallery.dataset.shadow = "true";
-    for (const vaultPath of paths) {
-      const imgFile = app.vault.getAbstractFileByPath(vaultPath) ?? app.metadataCache.getFirstLinkpathDest(vaultPath, sourceFile.path);
-      const img = document.createElement("img");
-      if (imgFile) {
-        const name = registerImage(imgFile, images);
-        img.setAttribute("src", `images/${name}`);
-        img.setAttribute("alt", imgFile.name);
-      } else {
-        img.setAttribute("src", vaultPath);
-        img.setAttribute("alt", vaultPath);
-      }
-      gallery.appendChild(img);
-    }
-    pre.replaceWith(gallery);
-  });
-}
 var PLUGIN_CODE_LANGS = /* @__PURE__ */ new Set([
   "dataview",
-  // Dataview DQL → plain code block
+  // Dataview DQL → shown as plain code block
   "dataviewjs",
-  // Dataview JS → plain code block
+  // Dataview JS → shown as plain code block
   "imgs",
   // image-cluster
   "tasks",
@@ -36912,6 +36638,7 @@ async function renderNote(app, file, rawContent) {
   });
   el.querySelectorAll(".copy-code-button").forEach((b) => b.remove());
   restorePluginCodeLangs(el);
+  const images = /* @__PURE__ */ new Map();
   const basePlaceholders = Array.from(el.querySelectorAll("[data-base-embed]"));
   for (const placeholder of basePlaceholders) {
     const name = (_a = placeholder.getAttribute("data-base-embed")) != null ? _a : "";
@@ -36920,7 +36647,7 @@ async function renderNote(app, file, rawContent) {
     );
     const temp = document.createElement("div");
     if (baseFile) {
-      temp.innerHTML = await renderBaseAsTable(app, baseFile);
+      temp.innerHTML = await renderBaseAsTable(app, baseFile, images);
     } else {
       temp.innerHTML = `<p class="base-error">Base \u672A\u627E\u5230: ${name}</p>`;
     }
@@ -36937,7 +36664,7 @@ async function renderNote(app, file, rawContent) {
     );
     const temp = document.createElement("div");
     if (baseFile) {
-      temp.innerHTML = await renderBaseAsTable(app, baseFile);
+      temp.innerHTML = await renderBaseAsTable(app, baseFile, images);
     } else {
       temp.innerHTML = `<p class="base-error">Base \u672A\u627E\u5230: ${src}</p>`;
     }
@@ -36952,7 +36679,6 @@ async function renderNote(app, file, rawContent) {
     (_a2 = table.parentNode) == null ? void 0 : _a2.insertBefore(wrapper, table);
     wrapper.appendChild(table);
   });
-  const images = /* @__PURE__ */ new Map();
   processImgsBlocks(app, file, el, images);
   collectImages(app, file, el, images);
   return { html: el.innerHTML, css: buildCss(), images };
@@ -37181,7 +36907,7 @@ ${htmlBody}
         });
       });
       lightbox.addEventListener('click', function(e) {
-        if (e.target === lbImg) return;
+        if (e.target === lbImg) return; // click on image itself does nothing
         lightbox.classList.remove('is-open');
         document.body.style.overflow = '';
         lbImg.setAttribute('src', '');
@@ -37699,6 +37425,44 @@ em { font-style: italic; }
 .base-link  { color: ${THEME}; text-decoration: none; font-size: inherit; }
 .base-link:hover { text-decoration: underline; }
 
+/* \u2500\u2500 Base cards / list view \u2500\u2500 */
+.base-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 1em 0;
+}
+.base-card {
+  border: 1px solid #DADCDE;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+.base-card-banner {
+  display: block;
+  width: 100%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.base-card-body {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.base-card-row {
+  font-size: 0.88em;
+  line-height: 1.45;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* \u2500\u2500 Dataview list \u2500\u2500 */
 ul.dv-list { padding-left: 1.5em; margin: 0.5em 0; }
 ul.dv-list li { margin: 0.25em 0; line-height: 1.6; }
@@ -37712,6 +37476,34 @@ body:hover ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.4); }
 }
 
 // src/exporter.ts
+function collectLinkedNotes(app, file) {
+  var _a, _b;
+  const links = (_b = (_a = app.metadataCache.getFileCache(file)) == null ? void 0 : _a.links) != null ? _b : [];
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const link of links) {
+    const dest = app.metadataCache.getFirstLinkpathDest(link.link, file.path);
+    if (dest && dest.extension === "md" && !seen.has(dest.path)) {
+      seen.add(dest.path);
+      result.push(dest);
+    }
+  }
+  return result;
+}
+function rewriteInternalLinks(html, subFolderMap) {
+  return html.replace(/<a([^>]*?)>/g, (match, attrs) => {
+    var _a, _b;
+    const dataHrefMatch = attrs.match(/data-href="([^"]*)"/);
+    if (!dataHrefMatch)
+      return match;
+    const dataHref = dataHrefMatch[1].split("#")[0];
+    const subFolder = (_b = subFolderMap.get(dataHref)) != null ? _b : subFolderMap.get((_a = dataHref.split("/").pop()) != null ? _a : "");
+    if (!subFolder)
+      return match;
+    const newAttrs = attrs.replace(/\bhref="[^"]*"/, `href="./${subFolder}/index.html"`);
+    return `<a${newAttrs}>`;
+  });
+}
 async function prepareExport(app, vault, file, existingName) {
   const raw = await vault.read(file);
   const { html: htmlBody, css, images } = await renderNote(app, file, raw);
@@ -37719,11 +37511,34 @@ async function prepareExport(app, vault, file, existingName) {
   const folderName = existingName != null ? existingName : Date.now().toString(36);
   return { noteName: folderName, html, css, images };
 }
-async function exportToLocal(app, vault, file, exportRoot) {
+async function exportToLocal(app, vault, file, exportRoot, includeLinkedNotes = false) {
   const result = await prepareExport(app, vault, file);
   const folderPath = path2.join(exportRoot, result.noteName);
   fs.mkdirSync(folderPath, { recursive: true });
-  fs.writeFileSync(path2.join(folderPath, "index.html"), result.html, "utf8");
+  let mainHtml = result.html;
+  if (includeLinkedNotes) {
+    const linkedFiles = collectLinkedNotes(app, file);
+    const subFolderMap = /* @__PURE__ */ new Map();
+    for (const linkedFile of linkedFiles) {
+      const subResult = await prepareExport(app, vault, linkedFile);
+      subFolderMap.set(linkedFile.basename, subResult.noteName);
+      subFolderMap.set(linkedFile.path.replace(/\.md$/i, ""), subResult.noteName);
+      const subFolderPath = path2.join(folderPath, subResult.noteName);
+      fs.mkdirSync(subFolderPath, { recursive: true });
+      fs.writeFileSync(path2.join(subFolderPath, "index.html"), subResult.html, "utf8");
+      fs.writeFileSync(path2.join(subFolderPath, "style.css"), subResult.css, "utf8");
+      if (subResult.images.size > 0) {
+        const subImagesDir = path2.join(subFolderPath, "images");
+        fs.mkdirSync(subImagesDir, { recursive: true });
+        for (const [exportName, imgFile] of subResult.images) {
+          const data = await vault.readBinary(imgFile);
+          fs.writeFileSync(path2.join(subImagesDir, exportName), Buffer.from(data));
+        }
+      }
+    }
+    mainHtml = rewriteInternalLinks(mainHtml, subFolderMap);
+  }
+  fs.writeFileSync(path2.join(folderPath, "index.html"), mainHtml, "utf8");
   fs.writeFileSync(path2.join(folderPath, "style.css"), result.css, "utf8");
   if (result.images.size > 0) {
     const imagesDir = path2.join(folderPath, "images");
@@ -37793,6 +37608,20 @@ async function uploadToOss(settings, vault, noteName, html, css, images) {
   new import_obsidian5.Notice(`\u4E0A\u4F20\u6210\u529F
 ${url}`);
   return url;
+}
+async function uploadSubNoteToOss(settings, vault, parentNoteName, subFolderName, html, css, images) {
+  const client = makeClient(settings);
+  const prefix = settings.ossPrefix.replace(/\/$/, "");
+  const basePath = `${prefix}/${parentNoteName}/${subFolderName}`;
+  await client.put(`${basePath}/index.html`, new Blob([html], { type: "text/html; charset=utf-8" }));
+  await client.put(`${basePath}/style.css`, new Blob([css], { type: "text/css; charset=utf-8" }));
+  for (const [exportName, imgFile] of images) {
+    const data = await vault.readBinary(imgFile);
+    await client.put(
+      `${basePath}/images/${exportName}`,
+      new Blob([data], { type: getMimeType(imgFile.extension) })
+    );
+  }
 }
 async function deleteFromOss(settings, noteName) {
   var _a;
@@ -37963,13 +37792,34 @@ var ShareOnlinePlugin = class extends import_obsidian6.Plugin {
     try {
       if (toOss) {
         const result = await prepareExport(this.app, this.app.vault, file, existingName);
-        return await uploadToOss(this.settings, this.app.vault, result.noteName, result.html, result.css, result.images);
+        let mainHtml = result.html;
+        if (this.settings.includeLinkedNotes) {
+          const linkedFiles = collectLinkedNotes(this.app, file);
+          const subFolderMap = /* @__PURE__ */ new Map();
+          for (const linkedFile of linkedFiles) {
+            const subResult = await prepareExport(this.app, this.app.vault, linkedFile);
+            subFolderMap.set(linkedFile.basename, subResult.noteName);
+            subFolderMap.set(linkedFile.path.replace(/\.md$/i, ""), subResult.noteName);
+            await uploadSubNoteToOss(
+              this.settings,
+              this.app.vault,
+              result.noteName,
+              subResult.noteName,
+              subResult.html,
+              subResult.css,
+              subResult.images
+            );
+          }
+          mainHtml = rewriteInternalLinks(mainHtml, subFolderMap);
+        }
+        return await uploadToOss(this.settings, this.app.vault, result.noteName, mainHtml, result.css, result.images);
       } else {
         await exportToLocal(
           this.app,
           this.app.vault,
           file,
-          this.settings.exportPath || DEFAULT_SETTINGS.exportPath
+          this.settings.exportPath || DEFAULT_SETTINGS.exportPath,
+          this.settings.includeLinkedNotes
         );
         return "";
       }

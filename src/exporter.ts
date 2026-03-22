@@ -3,6 +3,40 @@ import * as fs from "fs";
 import * as path from "path";
 import { renderNote, buildHtml } from "./renderer";
 
+/** Collect all directly linked markdown notes from a file (no duplicates). */
+export function collectLinkedNotes(app: App, file: TFile): TFile[] {
+	const links = app.metadataCache.getFileCache(file)?.links ?? [];
+	const seen = new Set<string>();
+	const result: TFile[] = [];
+	for (const link of links) {
+		const dest = app.metadataCache.getFirstLinkpathDest(link.link, file.path);
+		if (dest && dest.extension === "md" && !seen.has(dest.path)) {
+			seen.add(dest.path);
+			result.push(dest);
+		}
+	}
+	return result;
+}
+
+/**
+ * Rewrite internal Obsidian link hrefs in exported HTML
+ * so they point to the exported sub-note pages.
+ * subFolderMap: note basename / link path → subfolder name
+ */
+export function rewriteInternalLinks(html: string, subFolderMap: Map<string, string>): string {
+	return html.replace(/<a([^>]*?)>/g, (match, attrs: string) => {
+		const dataHrefMatch = attrs.match(/data-href="([^"]*)"/);
+		if (!dataHrefMatch) return match;
+		const dataHref = dataHrefMatch[1].split("#")[0];
+		const subFolder =
+			subFolderMap.get(dataHref) ??
+			subFolderMap.get(dataHref.split("/").pop() ?? "");
+		if (!subFolder) return match;
+		const newAttrs = attrs.replace(/\bhref="[^"]*"/, `href="./${subFolder}/index.html"`);
+		return `<a${newAttrs}>`;
+	});
+}
+
 export interface ExportResult {
 	noteName: string;
 	html: string;
@@ -22,13 +56,46 @@ export async function exportToLocal(
 	app: App,
 	vault: Vault,
 	file: TFile,
-	exportRoot: string
+	exportRoot: string,
+	includeLinkedNotes = false
 ): Promise<ExportResult> {
 	const result = await prepareExport(app, vault, file);
 
 	const folderPath = path.join(exportRoot, result.noteName);
 	fs.mkdirSync(folderPath, { recursive: true });
-	fs.writeFileSync(path.join(folderPath, "index.html"), result.html, "utf8");
+
+	let mainHtml = result.html;
+
+	if (includeLinkedNotes) {
+		const linkedFiles = collectLinkedNotes(app, file);
+		const subFolderMap = new Map<string, string>();
+
+		for (const linkedFile of linkedFiles) {
+			const subResult = await prepareExport(app, vault, linkedFile);
+			// subResult.noteName is the generated folder name (timestamp-based)
+			// Map both basename and path-without-extension so the rewriter finds it
+			subFolderMap.set(linkedFile.basename, subResult.noteName);
+			subFolderMap.set(linkedFile.path.replace(/\.md$/i, ""), subResult.noteName);
+
+			const subFolderPath = path.join(folderPath, subResult.noteName);
+			fs.mkdirSync(subFolderPath, { recursive: true });
+			fs.writeFileSync(path.join(subFolderPath, "index.html"), subResult.html, "utf8");
+			fs.writeFileSync(path.join(subFolderPath, "style.css"), subResult.css, "utf8");
+
+			if (subResult.images.size > 0) {
+				const subImagesDir = path.join(subFolderPath, "images");
+				fs.mkdirSync(subImagesDir, { recursive: true });
+				for (const [exportName, imgFile] of subResult.images) {
+					const data = await vault.readBinary(imgFile);
+					fs.writeFileSync(path.join(subImagesDir, exportName), Buffer.from(data));
+				}
+			}
+		}
+
+		mainHtml = rewriteInternalLinks(mainHtml, subFolderMap);
+	}
+
+	fs.writeFileSync(path.join(folderPath, "index.html"), mainHtml, "utf8");
 	fs.writeFileSync(path.join(folderPath, "style.css"), result.css, "utf8");
 
 	// Copy referenced images into images/ subfolder

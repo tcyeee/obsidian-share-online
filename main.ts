@@ -1,7 +1,7 @@
 import { Menu, Notice, Plugin, TFile } from "obsidian";
 import { ShareOnlineSettings, DEFAULT_SETTINGS, ShareOnlineSettingTab } from "./src/settings";
-import { exportToLocal, prepareExport } from "./src/exporter";
-import { uploadToOss, deleteFromOss } from "./src/oss";
+import { exportToLocal, prepareExport, collectLinkedNotes, rewriteInternalLinks } from "./src/exporter";
+import { uploadToOss, uploadSubNoteToOss, deleteFromOss } from "./src/oss";
 
 const THEME_COLOR = "#65A692";
 
@@ -193,13 +193,39 @@ export default class ShareOnlinePlugin extends Plugin {
 		try {
 			if (toOss) {
 				const result = await prepareExport(this.app, this.app.vault, file, existingName);
-				return await uploadToOss(this.settings, this.app.vault, result.noteName, result.html, result.css, result.images);
+				let mainHtml = result.html;
+
+				if (this.settings.includeLinkedNotes) {
+					const linkedFiles = collectLinkedNotes(this.app, file);
+					const subFolderMap = new Map<string, string>();
+
+					for (const linkedFile of linkedFiles) {
+						const subResult = await prepareExport(this.app, this.app.vault, linkedFile);
+						// subResult.noteName is the generated folder name; map basename/path to it
+						subFolderMap.set(linkedFile.basename, subResult.noteName);
+						subFolderMap.set(linkedFile.path.replace(/\.md$/i, ""), subResult.noteName);
+						await uploadSubNoteToOss(
+							this.settings,
+							this.app.vault,
+							result.noteName,
+							subResult.noteName,
+							subResult.html,
+							subResult.css,
+							subResult.images
+						);
+					}
+
+					mainHtml = rewriteInternalLinks(mainHtml, subFolderMap);
+				}
+
+				return await uploadToOss(this.settings, this.app.vault, result.noteName, mainHtml, result.css, result.images);
 			} else {
 				await exportToLocal(
 					this.app,
 					this.app.vault,
 					file,
-					this.settings.exportPath || DEFAULT_SETTINGS.exportPath
+					this.settings.exportPath || DEFAULT_SETTINGS.exportPath,
+					this.settings.includeLinkedNotes
 				);
 				return "";
 			}

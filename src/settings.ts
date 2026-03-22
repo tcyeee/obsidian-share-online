@@ -5,6 +5,7 @@ import type ShareOnlinePlugin from "../main";
 
 export interface ShareOnlineSettings {
 	exportPath: string;
+	includeLinkedNotes: boolean;
 	ossRegion: string;
 	ossBucket: string;
 	ossAccessKeyId: string;
@@ -15,6 +16,7 @@ export interface ShareOnlineSettings {
 
 export const DEFAULT_SETTINGS: ShareOnlineSettings = {
 	exportPath: path.join(os.homedir(), "Desktop"),
+	includeLinkedNotes: false,
 	ossRegion: "",
 	ossBucket: "",
 	ossAccessKeyId: "",
@@ -34,6 +36,21 @@ export class ShareOnlineSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+
+		// ── 导出设置 ──────────────────────────────
+		containerEl.createEl("h3", { text: "导出设置" });
+
+		new Setting(containerEl)
+			.setName("包含二级笔记")
+			.setDesc("导出单个笔记时，同时导出该笔记中链接的所有二级笔记")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.includeLinkedNotes)
+					.onChange(async (value) => {
+						this.plugin.settings.includeLinkedNotes = value;
+						await this.plugin.saveSettings();
+					})
+			);
 
 		// ── 本地导出 ──────────────────────────────
 		containerEl.createEl("h3", { text: "本地导出" });

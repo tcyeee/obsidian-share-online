@@ -74,6 +74,31 @@ export async function uploadToOss(
 	return url;
 }
 
+export async function uploadSubNoteToOss(
+	settings: ShareOnlineSettings,
+	vault: Vault,
+	parentNoteName: string,
+	subFolderName: string,
+	html: string,
+	css: string,
+	images: Map<string, TFile>
+): Promise<void> {
+	const client = makeClient(settings);
+	const prefix = settings.ossPrefix.replace(/\/$/, "");
+	const basePath = `${prefix}/${parentNoteName}/${subFolderName}`;
+
+	await client.put(`${basePath}/index.html`, new Blob([html], { type: "text/html; charset=utf-8" }));
+	await client.put(`${basePath}/style.css`, new Blob([css], { type: "text/css; charset=utf-8" }));
+
+	for (const [exportName, imgFile] of images) {
+		const data = await vault.readBinary(imgFile);
+		await client.put(
+			`${basePath}/images/${exportName}`,
+			new Blob([data], { type: getMimeType(imgFile.extension) })
+		);
+	}
+}
+
 export async function deleteFromOss(
 	settings: ShareOnlineSettings,
 	noteName: string

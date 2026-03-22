@@ -1,4 +1,5 @@
 import { App, TFile, parseYaml, CachedMetadata } from "obsidian";
+import { registerImage } from "./imgs-renderer";
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 
@@ -7,10 +8,14 @@ interface BaseConfig {
   formulas?:   Record<string, string>;
   properties?: Record<string, { displayName?: string }>;
   views?: Array<{
-    type?:       string;
-    order?:      string[];
-    sort?:       Array<{ property: string; direction?: string }>;
-    limit?:      number;
+    type?:             string;
+    name?:             string;
+    order?:            string[];
+    sort?:             Array<{ property: string; direction?: string }>;
+    limit?:            number;
+    image?:            string;   // e.g. "note.banner" — frontmatter field for card image
+    imageAspectRatio?: number;   // image height = cardSize * ratio
+    cardSize?:         number;   // card width in px
   }>;
 }
 
@@ -172,7 +177,13 @@ function evalExpr(expr: string, ctx: EvalCtx): string {
   if (expr === "file.mtime")      return String(ctx.stat.mtime);
   if (expr === "file.backlinks")  return "";
 
-  // frontmatter property
+  // note.FIELD → frontmatter property (Obsidian Bases convention)
+  if (expr.startsWith("note.")) {
+    const v = ctx.fm[expr.slice(5)];
+    return v !== undefined && v !== null ? escapeHtml(String(v)) : "";
+  }
+
+  // frontmatter property (bare name)
   const v = ctx.fm[expr];
   return v !== undefined && v !== null ? escapeHtml(String(v)) : "";
 }
@@ -236,7 +247,11 @@ function colLabel(col: string, properties: BaseConfig["properties"]): string {
 /* ── Public API ─────────────────────────────────────────────────────────── */
 
 /** Build an HTML table from a `.base` file by querying the vault. */
-export async function renderBaseAsTable(app: App, baseFile: TFile): Promise<string> {
+export async function renderBaseAsTable(
+  app: App,
+  baseFile: TFile,
+  images?: Map<string, TFile>
+): Promise<string> {
   const raw = await app.vault.read(baseFile);
   let config: BaseConfig;
   try { config = parseYaml(raw) as BaseConfig; }
@@ -287,7 +302,13 @@ export async function renderBaseAsTable(app: App, baseFile: TFile): Promise<stri
 
   if (matched.length === 0) return `<div class="base-empty">（无匹配记录）</div>`;
 
-  // ── Columns ──
+  // ── Cards / List view ──
+  const viewType = (view.type ?? "table").toLowerCase();
+  if (viewType === "cards" || viewType === "list") {
+    return renderCards(app, baseFile, config, view, matched, formulas, properties, vaultName, images);
+  }
+
+  // ── Columns (table view) ──
   const order = view.order?.length
     ? view.order
     : Object.keys(formulas).map(k => `formula.${k}`);
@@ -318,6 +339,81 @@ export async function renderBaseAsTable(app: App, baseFile: TFile): Promise<stri
   }).join("\n");
 
   return `<div class="table-wrapper">\n<table>\n<thead>${thead}</thead>\n<tbody>\n${tbody}\n</tbody>\n</table>\n</div>`;
+}
+
+/* ── Cards / List renderer ──────────────────────────────────────────────── */
+
+function renderCards(
+  app: App,
+  baseFile: TFile,
+  config: BaseConfig,
+  view: NonNullable<BaseConfig["views"]>[number],
+  matched: TFile[],
+  formulas: Record<string, string>,
+  properties: BaseConfig["properties"],
+  vaultName: string,
+  images?: Map<string, TFile>
+): string {
+  const cardSize         = view.cardSize ?? 200;
+  const imageAspectRatio = view.imageAspectRatio ?? 0.5;
+  const imgHeight        = Math.round(cardSize * imageAspectRatio);
+
+  // "note.banner" → "banner" (frontmatter key for the banner image)
+  const imgFmKey = view.image?.startsWith("note.")
+    ? view.image.slice(5)
+    : view.image ?? "";
+
+  const order = view.order?.length
+    ? view.order
+    : Object.keys(formulas).map(k => `formula.${k}`);
+
+  const cards = matched.map(f => {
+    const fm  = (app.metadataCache.getFileCache(f)?.frontmatter ?? {}) as Record<string, unknown>;
+    const s: Stat = { mtime: f.stat.mtime, ctime: f.stat.ctime };
+    const ctx: EvalCtx = { file: f, fm, stat: s, vaultName };
+
+    // ── Banner image ──
+    let bannerHtml = "";
+    if (imgFmKey) {
+      const raw = String(fm[imgFmKey] ?? "").replace(/^\//, "");
+      if (raw) {
+        const imgFile = (
+          app.vault.getAbstractFileByPath(raw) ??
+          app.metadataCache.getFirstLinkpathDest(raw, baseFile.path)
+        ) as TFile | null;
+        if (imgFile) {
+          const src = images
+            ? `images/${registerImage(imgFile, images)}`
+            : `app://local/${encodeURIComponent(imgFile.path)}`;
+          bannerHtml = `<img class="base-card-banner" src="${src}" alt="${escapeHtml(imgFile.name)}" style="height:${imgHeight}px">`;
+        }
+      }
+    }
+
+    // ── Content cells ──
+    const bodyHtml = order.map(col => {
+      let val = "";
+      if (col.startsWith("formula.")) {
+        const key = col.slice(8);
+        val = formulas[key] ? evalExpr(formulas[key], ctx) : "";
+      } else if (col.startsWith("note.")) {
+        const v = fm[col.slice(5)];
+        val = v !== undefined ? escapeHtml(String(v)) : "";
+      } else if (col === "file.name")     { val = escapeHtml(f.name); }
+      else if (col === "file.basename")   { val = escapeHtml(f.basename); }
+      else if (col === "file.mtime")      { val = formatDateValue(f.stat.mtime); }
+      else if (col === "file.ctime")      { val = formatDateValue(f.stat.ctime); }
+      else { const v = fm[col]; val = v !== undefined ? escapeHtml(String(v)) : ""; }
+
+      if (!val) return "";
+      const label = colLabel(col, properties);
+      return `<div class="base-card-row" title="${escapeHtml(label)}">${val}</div>`;
+    }).join("");
+
+    return `<div class="base-card" style="width:${cardSize}px">${bannerHtml}${bodyHtml ? `<div class="base-card-body">${bodyHtml}</div>` : ""}</div>`;
+  }).join("\n");
+
+  return `<div class="base-cards">${cards}</div>`;
 }
 
 /** Replace ![[*.base]] embeds with data-base-embed placeholder markers.
