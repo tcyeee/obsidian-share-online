@@ -114,7 +114,8 @@ function collectImages(
  * Add more plugin languages here as needed.
  */
 const PLUGIN_CODE_LANGS = new Set([
-  "dataview", "dataviewjs",           // Dataview
+  "dataview",                         // Dataview DQL → shown as plain code block
+  "dataviewjs",                       // Dataview JS → shown as plain code block
   "imgs",                             // image-cluster
   "tasks",                            // Tasks
   "chart",                            // Obsidian Charts
@@ -907,6 +908,10 @@ em { font-style: italic; }
 .base-error { color: #E06C75; font-size: 13px; margin: 0.8em 0; }
 .base-link  { color: ${THEME}; text-decoration: none; font-size: inherit; }
 .base-link:hover { text-decoration: underline; }
+
+/* ── Dataview list ── */
+ul.dv-list { padding-left: 1.5em; margin: 0.5em 0; }
+ul.dv-list li { margin: 0.25em 0; line-height: 1.6; }
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 3px; height: 3px; }

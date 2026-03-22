@@ -17193,8 +17193,8 @@ var require_aliyun_oss_sdk = __commonJS({
         }, { "get-intrinsic": 390, "gopd": 391, "has-property-descriptors": 392 }], 385: [function(require2, module4, exports3) {
           "use strict";
           var matchHtmlRegExp = /["'&<>]/;
-          module4.exports = escapeHtml2;
-          function escapeHtml2(string) {
+          module4.exports = escapeHtml3;
+          function escapeHtml3(string) {
             var str = "" + string;
             var match = matchHtmlRegExp.exec(str);
             if (!match) {
@@ -36372,6 +36372,357 @@ function resolveBaseEmbeds(content) {
   );
 }
 
+// src/dataview-renderer.ts
+function escapeHtml2(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function formatDate(val, fmt = "YYYY-MM-DD") {
+  let d;
+  if (typeof val === "number")
+    d = new Date(val);
+  else if (/^\d{10,}$/.test(val))
+    d = new Date(parseInt(val));
+  else
+    d = new Date(val);
+  if (isNaN(d.getTime()))
+    return String(val);
+  const tokens = {
+    YYYY: String(d.getFullYear()),
+    MM: String(d.getMonth() + 1).padStart(2, "0"),
+    DD: String(d.getDate()).padStart(2, "0"),
+    HH: String(d.getHours()).padStart(2, "0"),
+    mm: String(d.getMinutes()).padStart(2, "0"),
+    ss: String(d.getSeconds()).padStart(2, "0")
+  };
+  return fmt.replace(/YYYY|MM|DD|HH|mm|ss/g, (t) => {
+    var _a;
+    return (_a = tokens[t]) != null ? _a : t;
+  });
+}
+function splitTopLevel(s, sep) {
+  const parts = [];
+  let depth = 0, inStr = false, strChar = "", cur = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      cur += c;
+      if (c === strChar)
+        inStr = false;
+    } else if (c === '"' || c === "'") {
+      inStr = true;
+      strChar = c;
+      cur += c;
+    } else if (c === "(") {
+      depth++;
+      cur += c;
+    } else if (c === ")") {
+      depth--;
+      cur += c;
+    } else if (depth === 0 && s.slice(i).toLowerCase().startsWith(sep.toLowerCase())) {
+      parts.push(cur.trim());
+      cur = "";
+      i += sep.length - 1;
+    } else {
+      cur += c;
+    }
+  }
+  if (cur.trim())
+    parts.push(cur.trim());
+  return parts;
+}
+function parseColumns(raw) {
+  if (!raw.trim())
+    return [];
+  return splitTopLevel(raw, ",").map((part) => {
+    var _a;
+    const asM = (_a = part.match(/^([\s\S]+?)\s+AS\s+"([^"]+)"$/i)) != null ? _a : part.match(/^([\s\S]+?)\s+AS\s+(\S+)$/i);
+    return asM ? { expr: asM[1].trim(), alias: asM[2] } : { expr: part.trim(), alias: "" };
+  });
+}
+function parseDataviewQuery(raw) {
+  const CLAUSE = /^(TABLE|LIST|TASK|FROM|WHERE|SORT BY|SORT|LIMIT|GROUP BY|FLATTEN)\b/i;
+  const lines = raw.trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length)
+    return null;
+  const segments = [];
+  for (const line of lines) {
+    if (CLAUSE.test(line) || segments.length === 0)
+      segments.push(line);
+    else
+      segments[segments.length - 1] += " " + line;
+  }
+  let type = "table";
+  let withoutId = false;
+  let columns = [];
+  let from = "", where = "";
+  const sort = [];
+  let limit;
+  for (const seg of segments) {
+    if (/^TABLE\b/i.test(seg)) {
+      type = "table";
+      let rest = seg.slice(5).trim();
+      if (/^WITHOUT\s+ID\b/i.test(rest)) {
+        withoutId = true;
+        rest = rest.replace(/^WITHOUT\s+ID\s*/i, "");
+      }
+      columns = parseColumns(rest);
+    } else if (/^LIST\b/i.test(seg)) {
+      type = "list";
+      const field = seg.slice(4).trim();
+      if (field)
+        columns = [{ expr: field, alias: "" }];
+    } else if (/^TASK\b/i.test(seg)) {
+      type = "task";
+    } else if (/^FROM\b/i.test(seg)) {
+      from = seg.slice(4).trim();
+    } else if (/^WHERE\b/i.test(seg)) {
+      where = seg.slice(5).trim();
+    } else if (/^SORT(?:\s+BY)?\b/i.test(seg)) {
+      const sortStr = seg.replace(/^SORT(?:\s+BY)?\s*/i, "");
+      for (const part of splitTopLevel(sortStr, ",")) {
+        const m = part.trim().match(/^([\s\S]+?)\s+(ASC|DESC)$/i);
+        if (m)
+          sort.push({ field: m[1].trim(), desc: m[2].toUpperCase() === "DESC" });
+        else
+          sort.push({ field: part.trim(), desc: false });
+      }
+    } else if (/^LIMIT\b/i.test(seg)) {
+      const n = parseInt(seg.replace(/^LIMIT\s*/i, ""));
+      if (!isNaN(n))
+        limit = n;
+    }
+  }
+  return { type, withoutId, columns, from, where, sort, limit };
+}
+function getFileTags(meta) {
+  var _a, _b, _c;
+  const bodyTags = (_b = (_a = meta == null ? void 0 : meta.tags) == null ? void 0 : _a.map((t) => t.tag.replace(/^#/, "").toLowerCase())) != null ? _b : [];
+  const fmTags = (_c = meta == null ? void 0 : meta.frontmatter) == null ? void 0 : _c.tags;
+  const fmList = Array.isArray(fmTags) ? fmTags : fmTags ? [String(fmTags)] : [];
+  return /* @__PURE__ */ new Set([...bodyTags, ...fmList.map((t) => t.toLowerCase())]);
+}
+function matchesSource(src, file, meta) {
+  var _a;
+  src = src.trim();
+  if (!src)
+    return true;
+  const orParts = splitTopLevel(src, " OR ");
+  if (orParts.length > 1)
+    return orParts.some((p) => matchesSource(p, file, meta));
+  const andParts = splitTopLevel(src, " AND ");
+  if (andParts.length > 1)
+    return andParts.every((p) => matchesSource(p, file, meta));
+  if (/^NOT\s+/i.test(src))
+    return !matchesSource(src.slice(3).trim(), file, meta);
+  if (src.startsWith("-"))
+    return !matchesSource(src.slice(1).trim(), file, meta);
+  const tagM = src.match(/^#(.+)$/);
+  if (tagM)
+    return getFileTags(meta).has(tagM[1].toLowerCase());
+  const folderM = src.match(/^"([^"]+)"$/);
+  if (folderM) {
+    const folder = folderM[1].replace(/\/$/, "");
+    return file.path.startsWith(folder + "/") || ((_a = file.parent) == null ? void 0 : _a.path) === folder;
+  }
+  return true;
+}
+function getFieldRaw(expr, file, meta) {
+  var _a, _b;
+  const fm = (_a = meta == null ? void 0 : meta.frontmatter) != null ? _a : {};
+  if (expr === "file.name")
+    return file.name;
+  if (expr === "file.basename")
+    return file.basename;
+  if (expr === "file.path")
+    return file.path;
+  if (expr === "file.ctime")
+    return file.stat.ctime;
+  if (expr === "file.mtime")
+    return file.stat.mtime;
+  if (expr === "file.size")
+    return file.stat.size;
+  if (expr === "file.ext")
+    return file.extension;
+  return (_b = fm[expr]) != null ? _b : fm[expr.toLowerCase()];
+}
+function evalCondition(cond, file, meta) {
+  var _a;
+  cond = cond.trim();
+  if (!cond)
+    return true;
+  const orParts = splitTopLevel(cond, " OR ");
+  if (orParts.length > 1)
+    return orParts.some((c) => evalCondition(c, file, meta));
+  const andParts = splitTopLevel(cond, " AND ");
+  if (andParts.length > 1)
+    return andParts.every((c) => evalCondition(c, file, meta));
+  if (/^!\s*/.test(cond) || /^NOT\s+/i.test(cond))
+    return !evalCondition(cond.replace(/^!?\s*NOT\s+/i, "").trim(), file, meta);
+  const containsM = cond.match(/^contains\s*\(\s*([\w.]+)\s*,\s*"([^"]+)"\s*\)$/i);
+  if (containsM) {
+    const val = getFieldRaw(containsM[1], file, meta);
+    const target = containsM[2].replace(/^#/, "").toLowerCase();
+    if (Array.isArray(val))
+      return val.map(String).some((v) => v.toLowerCase().includes(target));
+    return String(val != null ? val : "").toLowerCase().includes(target);
+  }
+  const notNullM = cond.match(/^([\w.]+)\s*!=\s*(null|"")$/i);
+  if (notNullM) {
+    const val = getFieldRaw(notNullM[1], file, meta);
+    return val != null && val !== "";
+  }
+  const eqM = cond.match(/^([\w.]+)\s*=\s*"?([^"]*)"?$/i);
+  if (eqM) {
+    return String((_a = getFieldRaw(eqM[1], file, meta)) != null ? _a : "") === eqM[2];
+  }
+  if (/^[\w.]+$/.test(cond)) {
+    const val = getFieldRaw(cond, file, meta);
+    return val != null && val !== "" && val !== false;
+  }
+  return true;
+}
+function renderField(expr, file, meta, vault) {
+  var _a, _b;
+  expr = expr.trim();
+  const fm = (_a = meta == null ? void 0 : meta.frontmatter) != null ? _a : {};
+  const dfM = expr.match(/^dateformat\s*\(\s*([\s\S]+?)\s*,\s*"([^"]+)"\s*\)$/i);
+  if (dfM) {
+    const inner = renderField(dfM[1], file, meta, vault);
+    return formatDate(inner, dfM[2]);
+  }
+  const dateM = expr.match(/^date\s*\(\s*([\s\S]+?)\s*\)$/i);
+  if (dateM)
+    return formatDate(renderField(dateM[1], file, meta, vault));
+  if (expr === "file.link" || expr === "this.file.link") {
+    const href = `obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(file.path)}`;
+    return `<a href="${href}" class="base-link">${escapeHtml2(file.basename)}</a>`;
+  }
+  if (expr === "file.name")
+    return escapeHtml2(file.name);
+  if (expr === "file.basename")
+    return escapeHtml2(file.basename);
+  if (expr === "file.path")
+    return escapeHtml2(file.path);
+  if (expr === "file.ext")
+    return escapeHtml2(file.extension);
+  if (expr === "file.size")
+    return String(file.stat.size);
+  if (expr === "file.ctime")
+    return formatDate(file.stat.ctime);
+  if (expr === "file.mtime")
+    return formatDate(file.stat.mtime);
+  if (expr === "file.tags") {
+    const tags = [...getFileTags(meta)].map((t) => "#" + t);
+    return escapeHtml2(tags.join(", "));
+  }
+  const val = (_b = fm[expr]) != null ? _b : fm[expr.toLowerCase()];
+  if (val == null)
+    return "";
+  if (Array.isArray(val))
+    return escapeHtml2(val.join(", "));
+  const s = String(val);
+  if (/^\d{4}-\d{2}-\d{2}(T|\s|$)/.test(s))
+    return formatDate(s);
+  return escapeHtml2(s);
+}
+function defaultLabel(expr) {
+  const map = {
+    "file.link": "File",
+    "file.name": "Name",
+    "file.basename": "Name",
+    "file.path": "Path",
+    "file.ctime": "Created",
+    "file.mtime": "Modified",
+    "file.size": "Size",
+    "file.tags": "Tags",
+    "file.ext": "Ext"
+  };
+  if (map[expr])
+    return map[expr];
+  return expr.charAt(0).toUpperCase() + expr.slice(1);
+}
+function sortFiles(files, sortSpec, app, vault) {
+  if (!sortSpec.length)
+    return files;
+  return [...files].sort((a, b) => {
+    for (const { field, desc } of sortSpec) {
+      const ma = app.metadataCache.getFileCache(a);
+      const mb = app.metadataCache.getFileCache(b);
+      const va = renderField(field, a, ma, vault);
+      const vb = renderField(field, b, mb, vault);
+      const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+      if (cmp !== 0)
+        return desc ? -cmp : cmp;
+    }
+    return 0;
+  });
+}
+function renderTable(files, query, app, vault) {
+  const cols = query.withoutId ? query.columns : [{ expr: "file.link", alias: "File" }, ...query.columns];
+  const headers = cols.map((c) => c.alias || defaultLabel(c.expr));
+  const thead = `<tr>${headers.map((h) => `<th>${escapeHtml2(h)}</th>`).join("")}</tr>`;
+  const tbody = files.map((f) => {
+    const meta = app.metadataCache.getFileCache(f);
+    const cells = cols.map((c) => `<td>${renderField(c.expr, f, meta, vault)}</td>`);
+    return `<tr>${cells.join("")}</tr>`;
+  }).join("\n");
+  return `<div class="table-wrapper">
+<table>
+<thead>${thead}</thead>
+<tbody>
+${tbody}
+</tbody>
+</table>
+</div>`;
+}
+function renderList(files, query, vault, app) {
+  const displayCol = query.columns[0];
+  const items = files.map((f) => {
+    const meta = app.metadataCache.getFileCache(f);
+    const link = `obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(f.path)}`;
+    const label = displayCol ? renderField(displayCol.expr, f, meta, vault) : `<a href="${link}" class="base-link">${escapeHtml2(f.basename)}</a>`;
+    return `<li>${label}</li>`;
+  }).join("\n");
+  return `<ul class="dv-list">
+${items}
+</ul>`;
+}
+function renderDataviewQuery(app, sourceFile, queryText) {
+  const query = parseDataviewQuery(queryText);
+  if (!query)
+    return `<div class="base-error">\u65E0\u6CD5\u89E3\u6790 Dataview \u67E5\u8BE2</div>`;
+  if (query.type === "task") {
+    return `<pre><code class="language-dataview">${escapeHtml2(queryText)}</code></pre>`;
+  }
+  const vault = app.vault.getName();
+  let files = app.vault.getMarkdownFiles().filter((f) => {
+    const meta = app.metadataCache.getFileCache(f);
+    return matchesSource(query.from, f, meta) && evalCondition(query.where, f, meta);
+  });
+  files = sortFiles(files, query.sort, app, vault);
+  if (query.limit !== void 0)
+    files = files.slice(0, query.limit);
+  if (files.length === 0)
+    return `<div class="base-empty">\uFF08\u65E0\u5339\u914D\u7ED3\u679C\uFF09</div>`;
+  return query.type === "list" ? renderList(files, query, vault, app) : renderTable(files, query, vault, app);
+}
+function processDataviewBlocks(app, sourceFile, el) {
+  var _a, _b;
+  const codeEls = Array.from(
+    el.querySelectorAll("code.language-dataview")
+  );
+  for (const codeEl of codeEls) {
+    const pre = (_a = codeEl.closest("pre")) != null ? _a : codeEl.parentElement;
+    if (!pre)
+      continue;
+    const queryText = (_b = codeEl.textContent) != null ? _b : "";
+    const html = renderDataviewQuery(app, sourceFile, queryText);
+    const temp = document.createElement("div");
+    temp.innerHTML = html;
+    pre.replaceWith(...Array.from(temp.childNodes));
+  }
+}
+
 // src/renderer.ts
 var THEME = "#65A692";
 function extractMath(content) {
@@ -36452,8 +36803,9 @@ function collectImages(app, sourceFile, el) {
 }
 var PLUGIN_CODE_LANGS = /* @__PURE__ */ new Set([
   "dataview",
+  // Dataview DQL → plain code block
   "dataviewjs",
-  // Dataview
+  // Dataview JS → plain code block
   "imgs",
   // image-cluster
   "tasks",
@@ -37221,6 +37573,10 @@ em { font-style: italic; }
 .base-error { color: #E06C75; font-size: 13px; margin: 0.8em 0; }
 .base-link  { color: ${THEME}; text-decoration: none; font-size: inherit; }
 .base-link:hover { text-decoration: underline; }
+
+/* \u2500\u2500 Dataview list \u2500\u2500 */
+ul.dv-list { padding-left: 1.5em; margin: 0.5em 0; }
+ul.dv-list li { margin: 0.25em 0; line-height: 1.6; }
 
 /* \u2500\u2500 Scrollbar \u2500\u2500 */
 ::-webkit-scrollbar { width: 3px; height: 3px; }
