@@ -779,7 +779,8 @@ blockquote p { color: #81888D; font-size: 14px; margin: 0; }
 
 /* ── Task list ── */
 .contains-task-list { list-style: none; padding-left: 0.25em; }
-.task-list-item { display: flex; align-items: baseline; gap: 0.5em; margin: 0.3em 0; }
+.task-list-item { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.5em; margin: 0.3em 0; }
+.task-list-item > ul, .task-list-item > ol { flex: 0 0 100%; padding-left: 1.5em; margin: 0.2em 0 0; }
 .task-list-item-checkbox {
   -webkit-appearance: none;
   appearance: none;
@@ -799,7 +800,7 @@ blockquote p { color: #81888D; font-size: 14px; margin: 0; }
   background-position: center;
   background-repeat: no-repeat;
 }
-.task-list-item.is-checked > *:not(.task-list-item-checkbox) { color: #aaa; text-decoration: line-through; }
+.task-list-item.is-checked > *:not(.task-list-item-checkbox):not(ul):not(ol) { color: #aaa; text-decoration: line-through; }
 
 /* ── Lists ── */
 ul, ol { padding-left: 1.5em; margin: 0.8em 0; }

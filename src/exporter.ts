@@ -27,12 +27,13 @@ export function rewriteInternalLinks(html: string, subFolderMap: Map<string, str
 	return html.replace(/<a([^>]*?)>/g, (match, attrs: string) => {
 		const dataHrefMatch = attrs.match(/data-href="([^"]*)"/);
 		if (!dataHrefMatch) return match;
-		const dataHref = dataHrefMatch[1].split("#")[0];
+		const dataHref = dataHrefMatch[1].split("#")[0].replace(/\.md$/i, "");
 		const subFolder =
 			subFolderMap.get(dataHref) ??
 			subFolderMap.get(dataHref.split("/").pop() ?? "");
 		if (!subFolder) return match;
-		const newAttrs = attrs.replace(/\bhref="[^"]*"/, `href="./${subFolder}/index.html"`);
+		// Use negative lookbehind to avoid matching the `href` inside `data-href="..."`
+		const newAttrs = attrs.replace(/(?<![a-zA-Z-])href="[^"]*"/, `href="./${subFolder}/index.html"`);
 		return `<a${newAttrs}>`;
 	});
 }

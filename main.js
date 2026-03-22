@@ -37496,11 +37496,11 @@ function rewriteInternalLinks(html, subFolderMap) {
     const dataHrefMatch = attrs.match(/data-href="([^"]*)"/);
     if (!dataHrefMatch)
       return match;
-    const dataHref = dataHrefMatch[1].split("#")[0];
+    const dataHref = dataHrefMatch[1].split("#")[0].replace(/\.md$/i, "");
     const subFolder = (_b = subFolderMap.get(dataHref)) != null ? _b : subFolderMap.get((_a = dataHref.split("/").pop()) != null ? _a : "");
     if (!subFolder)
       return match;
-    const newAttrs = attrs.replace(/\bhref="[^"]*"/, `href="./${subFolder}/index.html"`);
+    const newAttrs = attrs.replace(/(?<![a-zA-Z-])href="[^"]*"/, `href="./${subFolder}/index.html"`);
     return `<a${newAttrs}>`;
   });
 }
