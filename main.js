@@ -36450,10 +36450,47 @@ function collectImages(app, sourceFile, el) {
   });
   return images;
 }
+var PLUGIN_CODE_LANGS = /* @__PURE__ */ new Set([
+  "dataview",
+  "dataviewjs",
+  // Dataview
+  "imgs",
+  // image-cluster
+  "tasks",
+  // Tasks
+  "chart",
+  // Obsidian Charts
+  "ad",
+  "ad-note",
+  "ad-tip",
+  "ad-warning",
+  "ad-danger"
+  // Admonition (legacy)
+]);
+var PLUGIN_LANG_PREFIX = "export-raw-";
+function protectPluginCodeBlocks(content) {
+  return content.replace(
+    /^(`{3,})([\w][\w-]*)[ \t]*$/gm,
+    (match, fence, lang) => {
+      if (!PLUGIN_CODE_LANGS.has(lang.toLowerCase()))
+        return match;
+      return `${fence}${PLUGIN_LANG_PREFIX}${lang}`;
+    }
+  );
+}
+function restorePluginCodeLangs(el) {
+  el.querySelectorAll("code[class]").forEach((code) => {
+    code.className = code.className.replace(
+      new RegExp(`language-${PLUGIN_LANG_PREFIX}(\\S+)`, "g"),
+      "language-$1"
+    );
+  });
+}
 async function renderNote(app, file, rawContent) {
   var _a, _b, _c;
   let content = rawContent.replace(/^---[\s\S]*?---\n?/, "");
   content = resolveBaseEmbeds(content);
+  content = protectPluginCodeBlocks(content);
   const { processed, entries } = extractMath(content);
   const el = document.createElement("div");
   el.className = "markdown-preview-view markdown-rendered";
@@ -36470,6 +36507,7 @@ async function renderNote(app, file, rawContent) {
       placeholder.textContent = entry.latex;
   });
   el.querySelectorAll(".copy-code-button").forEach((b) => b.remove());
+  restorePluginCodeLangs(el);
   const basePlaceholders = Array.from(el.querySelectorAll("[data-base-embed]"));
   for (const placeholder of basePlaceholders) {
     const name = (_a = placeholder.getAttribute("data-base-embed")) != null ? _a : "";

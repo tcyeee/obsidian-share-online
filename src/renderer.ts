@@ -106,6 +106,53 @@ function collectImages(
   return images;
 }
 
+/* ── Plugin code-block protection ──────────────────────────────────────── */
+
+/**
+ * Languages whose code blocks are rendered by Obsidian plugins and cannot
+ * display correctly in a static HTML export.
+ * Add more plugin languages here as needed.
+ */
+const PLUGIN_CODE_LANGS = new Set([
+  "dataview", "dataviewjs",           // Dataview
+  "imgs",                             // image-cluster
+  "tasks",                            // Tasks
+  "chart",                            // Obsidian Charts
+  "ad", "ad-note", "ad-tip",
+  "ad-warning", "ad-danger",          // Admonition (legacy)
+]);
+
+/**
+ * Prefix prepended to plugin language names so Obsidian finds no registered
+ * processor and renders a plain <pre><code> block instead.
+ */
+const PLUGIN_LANG_PREFIX = "export-raw-";
+
+/**
+ * In the markdown content, rename plugin code block languages to a prefixed
+ * variant that no plugin handles — e.g. ```dataview → ```export-raw-dataview.
+ * The prefix is stripped back from the DOM after MarkdownRenderer runs.
+ */
+function protectPluginCodeBlocks(content: string): string {
+  return content.replace(
+    /^(`{3,})([\w][\w-]*)[ \t]*$/gm,
+    (match, fence, lang) => {
+      if (!PLUGIN_CODE_LANGS.has(lang.toLowerCase())) return match;
+      return `${fence}${PLUGIN_LANG_PREFIX}${lang}`;
+    }
+  );
+}
+
+/** Restore the original language names in the rendered DOM. */
+function restorePluginCodeLangs(el: HTMLElement): void {
+  el.querySelectorAll<HTMLElement>("code[class]").forEach(code => {
+    code.className = code.className.replace(
+      new RegExp(`language-${PLUGIN_LANG_PREFIX}(\\S+)`, "g"),
+      "language-$1"
+    );
+  });
+}
+
 /* ── Renderer ──────────────────────────────────────────────────────────── */
 export async function renderNote(
   app: App,
@@ -114,6 +161,7 @@ export async function renderNote(
 ): Promise<{ html: string; css: string; images: Map<string, TFile> }> {
   let content = rawContent.replace(/^---[\s\S]*?---\n?/, "");
   content = resolveBaseEmbeds(content);
+  content = protectPluginCodeBlocks(content);
   const { processed, entries } = extractMath(content);
 
   const el = document.createElement("div");
@@ -136,6 +184,9 @@ export async function renderNote(
 
   // Remove Obsidian's native copy buttons
   el.querySelectorAll(".copy-code-button").forEach((b) => b.remove());
+
+  // Restore plugin code block language labels (strip the export-raw- prefix)
+  restorePluginCodeLangs(el);
 
   // Replace base embed placeholders (data-base-embed attr) with real tables
   const basePlaceholders = Array.from(el.querySelectorAll<HTMLElement>("[data-base-embed]"));
