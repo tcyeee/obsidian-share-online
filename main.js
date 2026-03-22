@@ -36747,6 +36747,7 @@ function extractMath(content) {
   processed = processed.replace(/\x00C(\d+)\x00/g, (_, i) => codes[+i]);
   return { processed, entries };
 }
+// src/imgs-renderer.ts
 function registerImage(imgFile, images) {
   for (const [name2, f] of images) {
     if (f.path === imgFile.path)
@@ -36764,8 +36765,7 @@ function registerImage(imgFile, images) {
   images.set(name, imgFile);
   return name;
 }
-function collectImages(app, sourceFile, el) {
-  const images = /* @__PURE__ */ new Map();
+function collectImages(app, sourceFile, el, images = /* @__PURE__ */ new Map()) {
   const vaultBasePath = app.vault.adapter instanceof import_obsidian3.FileSystemAdapter ? app.vault.adapter.basePath : "";
   el.querySelectorAll(".internal-embed").forEach((embed) => {
     var _a;
@@ -36800,6 +36800,58 @@ function collectImages(app, sourceFile, el) {
     }
   });
   return images;
+}
+function parseImgsBlock(raw) {
+  const config = { border: false, shadow: false };
+  const paths = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.endsWith(";;")) {
+      const params = trimmed.slice(0, -2);
+      for (const pair of params.split("&")) {
+        const [key, val] = pair.split("=").map((s) => s.trim().toLowerCase());
+        if (key === "border") config.border = val === "true";
+        if (key === "shadow") config.shadow = val === "true";
+      }
+      continue;
+    }
+    const mdMatch = trimmed.match(/^!\[.*?\]\(([^)]+)\)$/);
+    if (mdMatch) {
+      paths.push(mdMatch[1].replace(/^\//, ""));
+      continue;
+    }
+    if (trimmed.startsWith("/") || trimmed.includes(".")) {
+      paths.push(trimmed.replace(/^\//, ""));
+    }
+  }
+  return { config, paths };
+}
+function processImgsBlocks(app, sourceFile, el, images) {
+  el.querySelectorAll("code.language-imgs").forEach((code) => {
+    var _a;
+    const pre = (_a = code.closest("pre")) != null ? _a : code.parentElement;
+    if (!pre) return;
+    const { config, paths } = parseImgsBlock(code.textContent ?? "");
+    const gallery = document.createElement("div");
+    gallery.className = "imgs-gallery";
+    if (config.border) gallery.dataset.border = "true";
+    if (config.shadow) gallery.dataset.shadow = "true";
+    for (const vaultPath of paths) {
+      const imgFile = app.vault.getAbstractFileByPath(vaultPath) ?? app.metadataCache.getFirstLinkpathDest(vaultPath, sourceFile.path);
+      const img = document.createElement("img");
+      if (imgFile) {
+        const name = registerImage(imgFile, images);
+        img.setAttribute("src", `images/${name}`);
+        img.setAttribute("alt", imgFile.name);
+      } else {
+        img.setAttribute("src", vaultPath);
+        img.setAttribute("alt", vaultPath);
+      }
+      gallery.appendChild(img);
+    }
+    pre.replaceWith(gallery);
+  });
 }
 var PLUGIN_CODE_LANGS = /* @__PURE__ */ new Set([
   "dataview",
@@ -36900,7 +36952,9 @@ async function renderNote(app, file, rawContent) {
     (_a2 = table.parentNode) == null ? void 0 : _a2.insertBefore(wrapper, table);
     wrapper.appendChild(table);
   });
-  const images = collectImages(app, file, el);
+  const images = /* @__PURE__ */ new Map();
+  processImgsBlocks(app, file, el, images);
+  collectImages(app, file, el, images);
   return { html: el.innerHTML, css: buildCss(), images };
 }
 function buildHtml(title, htmlBody) {
@@ -36953,6 +37007,7 @@ function buildHtml(title, htmlBody) {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
   </button>
   <div class="toc-backdrop" id="toc-backdrop"></div>
+  <div class="lightbox" id="lightbox"><img id="lightbox-img" src="" alt=""></div>
   <nav class="toc-sidebar" id="toc-sidebar">
     <div class="toc-header">
       <span class="toc-title">OUTLINE</span>
@@ -37108,6 +37163,35 @@ ${htmlBody}
           document.getElementById('toc-backdrop').classList.remove('is-visible');
           document.body.style.overflow = '';
         });
+      });
+    })();
+
+    /* \u2500\u2500 Imgs lightbox \u2500\u2500 */
+    (function() {
+      var lightbox = document.getElementById('lightbox');
+      var lbImg    = document.getElementById('lightbox-img');
+      if (!lightbox || !lbImg) return;
+      document.querySelectorAll('.imgs-gallery img').forEach(function(img) {
+        img.addEventListener('click', function(e) {
+          e.stopPropagation();
+          lbImg.setAttribute('src', img.getAttribute('src'));
+          lbImg.setAttribute('alt', img.getAttribute('alt') || '');
+          lightbox.classList.add('is-open');
+          document.body.style.overflow = 'hidden';
+        });
+      });
+      lightbox.addEventListener('click', function(e) {
+        if (e.target === lbImg) return;
+        lightbox.classList.remove('is-open');
+        document.body.style.overflow = '';
+        lbImg.setAttribute('src', '');
+      });
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          lightbox.classList.remove('is-open');
+          document.body.style.overflow = '';
+          lbImg.setAttribute('src', '');
+        }
       });
     })();
 
@@ -37563,6 +37647,47 @@ hr { border: none; border-top: 1px dashed #DADCDE; margin: 1.5em 0; }
 
 /* \u2500\u2500 Image \u2500\u2500 */
 img { max-width: 100%; border-radius: 4px; }
+
+/* \u2500\u2500 Imgs gallery \u2500\u2500 */
+.imgs-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 1em 0;
+}
+.imgs-gallery img {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 4px;
+  cursor: zoom-in;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.imgs-gallery img:hover { opacity: 0.85; }
+.imgs-gallery[data-border="true"] img { border: 1px solid #DADCDE; }
+.imgs-gallery[data-shadow="true"] img { box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
+
+/* \u2500\u2500 Lightbox \u2500\u2500 */
+.lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.85);
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox.is-open { display: flex; }
+.lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 6px;
+  cursor: default;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
 
 /* \u2500\u2500 Misc \u2500\u2500 */
 strong { font-weight: 600; }

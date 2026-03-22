@@ -1,5 +1,6 @@
 import { App, TFile, MarkdownRenderer, Component, FileSystemAdapter } from "obsidian";
 import { renderBaseAsTable, resolveBaseEmbeds } from "./base-renderer";
+import { registerImage, processImgsBlocks } from "./imgs-renderer";
 
 const THEME = "#65A692";
 
@@ -41,42 +42,23 @@ function extractMath(content: string): { processed: string; entries: MathEntry[]
 /* ── Image collection helpers ───────────────────────────────────────────── */
 
 /**
- * Register an image TFile into the export map.
- * Returns the de-duplicated filename that will be used under images/.
- */
-function registerImage(imgFile: TFile, images: Map<string, TFile>): string {
-  for (const [name, f] of images) {
-    if (f.path === imgFile.path) return name; // already registered
-  }
-  let name = imgFile.name;
-  if (images.has(name)) {
-    const ext  = imgFile.extension ? `.${imgFile.extension}` : "";
-    const base = imgFile.basename;
-    let i = 1;
-    while (images.has(`${base}_${i}${ext}`)) i++;
-    name = `${base}_${i}${ext}`;
-  }
-  images.set(name, imgFile);
-  return name;
-}
-
-/**
  * Scan the rendered DOM for images, collect the originating TFiles,
  * and rewrite every img[src] to a relative `images/{name}` path.
+ * Pass a pre-populated `images` map to share it with processImgsBlocks.
  */
 function collectImages(
   app: App,
   sourceFile: TFile,
-  el: HTMLElement
+  el: HTMLElement,
+  images = new Map<string, TFile>()
 ): Map<string, TFile> {
-  const images = new Map<string, TFile>();
   const vaultBasePath =
     app.vault.adapter instanceof FileSystemAdapter
       ? app.vault.adapter.basePath
       : "";
 
   // ── 1. Obsidian wiki-style embeds: .internal-embed[src] wrapping an <img> ──
-  el.querySelectorAll<HTMLElement>(".internal-embed").forEach(embed => {
+  el.querySelectorAll<HTMLElement>(".internal-embed").forEach((embed) => {
     const imgEl = embed.querySelector<HTMLImageElement>("img");
     if (!imgEl) return;
     const src = embed.getAttribute("src") ?? "";
@@ -233,8 +215,12 @@ export async function renderNote(
     wrapper.appendChild(table);
   });
 
-  // Collect images and rewrite src to relative paths
-  const images = collectImages(app, file, el);
+  // Process imgs code blocks: parse paths, build gallery, register images
+  const images = new Map<string, TFile>();
+  processImgsBlocks(app, file, el, images);
+
+  // Collect remaining images (wiki embeds, markdown images) into same map
+  collectImages(app, file, el, images);
 
   return { html: el.innerHTML, css: buildCss(), images };
 }
@@ -286,6 +272,7 @@ export function buildHtml(title: string, htmlBody: string): string {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
   </button>
   <div class="toc-backdrop" id="toc-backdrop"></div>
+  <div class="lightbox" id="lightbox"><img id="lightbox-img" src="" alt=""></div>
   <nav class="toc-sidebar" id="toc-sidebar">
     <div class="toc-header">
       <span class="toc-title">OUTLINE</span>
@@ -441,6 +428,35 @@ ${htmlBody}
           document.getElementById('toc-backdrop').classList.remove('is-visible');
           document.body.style.overflow = '';
         });
+      });
+    })();
+
+    /* ── Imgs lightbox ── */
+    (function() {
+      var lightbox = document.getElementById('lightbox');
+      var lbImg    = document.getElementById('lightbox-img');
+      if (!lightbox || !lbImg) return;
+      document.querySelectorAll('.imgs-gallery img').forEach(function(img) {
+        img.addEventListener('click', function(e) {
+          e.stopPropagation();
+          lbImg.setAttribute('src', img.getAttribute('src'));
+          lbImg.setAttribute('alt', img.getAttribute('alt') || '');
+          lightbox.classList.add('is-open');
+          document.body.style.overflow = 'hidden';
+        });
+      });
+      lightbox.addEventListener('click', function(e) {
+        if (e.target === lbImg) return; // click on image itself does nothing
+        lightbox.classList.remove('is-open');
+        document.body.style.overflow = '';
+        lbImg.setAttribute('src', '');
+      });
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          lightbox.classList.remove('is-open');
+          document.body.style.overflow = '';
+          lbImg.setAttribute('src', '');
+        }
       });
     })();
 
@@ -898,6 +914,47 @@ hr { border: none; border-top: 1px dashed #DADCDE; margin: 1.5em 0; }
 
 /* ── Image ── */
 img { max-width: 100%; border-radius: 4px; }
+
+/* ── Imgs gallery ── */
+.imgs-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 1em 0;
+}
+.imgs-gallery img {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 4px;
+  cursor: zoom-in;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.imgs-gallery img:hover { opacity: 0.85; }
+.imgs-gallery[data-border="true"] img { border: 1px solid #DADCDE; }
+.imgs-gallery[data-shadow="true"] img { box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
+
+/* ── Lightbox ── */
+.lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.85);
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox.is-open { display: flex; }
+.lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 6px;
+  cursor: default;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
 
 /* ── Misc ── */
 strong { font-weight: 600; }
