@@ -1,4 +1,4 @@
-# Publish as Link
+# Publish Single Note as Webpage
 
 An [Obsidian](https://obsidian.md) plugin that publishes your notes to Alibaba Cloud OSS and shares them as a link with one click — or exports them as polished, standalone web pages locally.
 
@@ -59,7 +59,7 @@ Once published, clicking the status bar icon gives you:
 
 ## Configuration
 
-Open **Settings → Publish as Link**:
+Open **Settings → Deploy Single Note as Webpage**:
 
 | Setting              | Description                                                  | Default     |
 | -------------------- | ------------------------------------------------------------ | ----------- |

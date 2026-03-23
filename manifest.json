@@ -1,6 +1,6 @@
 {
   "id": "publish-as-link",
-  "name": "Publish as Link",
+  "name": "Publish Single Note as Webpage",
   "version": "1.0.0",
   "minAppVersion": "0.15.0",
   "description": "Publish your notes to Alibaba Cloud OSS and share them as a link with one click",
