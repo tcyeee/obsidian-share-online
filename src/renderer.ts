@@ -866,10 +866,10 @@ tbody tr:nth-child(even) { background: rgba(101, 166, 146, 0.03); }
 .callout-content {
   padding: 10px 14px;
   font-size: 0.9rem;
-  color: #888;
+  color: inherit;
   overflow: hidden;
   max-height: 4000px;
-  opacity: 0.1;
+  opacity: 0.85;
   transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.3s ease;
 }
 .callout.is-collapsed .callout-content {
